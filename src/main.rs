@@ -21,7 +21,6 @@ use glfw::{Context, Key, PWindow};
 use std::{time,thread};
 use std::time::Instant;
 
-use utils::Vao;
 use camera::Camera;
 
 
@@ -30,23 +29,27 @@ pub const FPS: f64 = 60.;
 
 struct AppState {
     window: PWindow,
-    wireframe: bool,
-    cursor_enabled: bool,
     camera: Camera,
     d_t: f32,
     light_dir: Vec3,
     input: utils::InputTracker,
+
+    wireframe: bool,
+    cursor_enabled: bool,
+    octree_skeleton: bool,
 }
 impl AppState {
     fn with_window(window: PWindow) -> Self {
         AppState {
             window,
-            wireframe: false,
-            cursor_enabled:true,
             camera: Camera::default(),
             d_t: 1.,
             light_dir: vec3!(1.,0.,0.),
             input: utils::InputTracker::new(),
+
+            wireframe: false,
+            cursor_enabled:true,
+            octree_skeleton: false,
         }
     }
 }
@@ -55,92 +58,22 @@ const MAGENTA:&str = "\x1b[35m";
 const GREEN:&str = "\x1b[32m";
 const RESET_COL:&str = "\x1b[0m";
 
-#[derive(Debug,Copy,Clone)]
-pub enum Dir {
-    X,
-    NEG_X,
-    Y,
-    NEG_Y,
-    Z,
-    NEG_Z,
-}
-impl Into<Vec3> for Dir {
-    fn into(self) -> Vec3 {
-        match self {
-            Dir::X => Vec3::X,
-            Dir::NEG_X => Vec3::NEG_X,
-            Dir::Y => Vec3::Y,
-            Dir::NEG_Y => Vec3::NEG_Y,
-            Dir::Z => Vec3::Z,
-            Dir::NEG_Z => Vec3::NEG_Z,
-        }
-    }
-}
-impl Into<IVec3> for Dir {
-    fn into(self) -> IVec3 {
-        match self {
-            Dir::X => IVec3::X,
-            Dir::NEG_X => IVec3::NEG_X,
-            Dir::Y => IVec3::Y,
-            Dir::NEG_Y => IVec3::NEG_Y,
-            Dir::Z => IVec3::Z,
-            Dir::NEG_Z => IVec3::NEG_Z,
-        }
-    }
-}
-
-
-fn hit_direction(hit: Vec3, dir: Vec3) -> Dir {
-    let x = (hit.x - hit.x.round()).abs();
-    let y = (hit.y - hit.y.round()).abs();
-    let z = (hit.z - hit.z.round()).abs();
-
-    if x < y && x < z {
-        if dir.x < 0. {
-            return Dir::NEG_X;
-        } else {
-            return Dir::X;
-        }
-    } else if y < z {
-        if dir.y < 0. {
-            return Dir::NEG_Y;
-        } else {
-            return Dir::Y;
-        }
-    } else {
-        if dir.z < 0. {
-            return Dir::NEG_Z;
-        } else {
-            return Dir::Z;
-        }
-    }
-}
-
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(RES) };
     let mut state = AppState::with_window(win);
-    let camera = state.camera;
     
-    let mut octree = octree::Octree::new(16,ivec3!(0,0,0));
-    octree.add_block(ivec3!(0,0,0));
-    octree.add_block(ivec3!(0,0,1));
-    octree.add_block(ivec3!(0,1,0));
-    octree.add_block(ivec3!(0,1,1));
-    octree.add_block(ivec3!(1,0,0));
-    octree.add_block(ivec3!(1,0,1));
-    octree.add_block(ivec3!(1,1,0));
-    octree.add_block(ivec3!(1,1,1));
+    let mut octree = chunk::gen_chunk_octree_2d();
 
     let mut octree_skeleton_mesh = octree.gen_skeleton_mesh();
     let mut octree_skeleton_vao = unsafe { utils::vao_from_mesh(&octree_skeleton_mesh) };
     let mut octree_mesh = octree.gen_mesh();
     let mut octree_vao = unsafe { utils::vao_from_mesh(&octree_mesh) };
 
-    let chunk_data = chunk::gen_chunk_data();
+    //let chunk_data = chunk::gen_chunk_data();
 
-    let mut chunk_mesh = chunk::gen_mesh(&chunk_data);
+    //let mut chunk_mesh = chunk::gen_mesh(&chunk_data);
 
-    let chunk_vao = unsafe { utils::vao_from_mesh(&chunk_mesh) };
+    //let chunk_vao = unsafe { utils::vao_from_mesh(&chunk_mesh) };
 
     // Load shaders
     let (program,solid_color_program,solid_color_alpha_program) = unsafe {
@@ -167,7 +100,7 @@ fn main() {
     let mut time_buffer = utils::TimeBuffer::new(40);
 
     while !state.window.should_close() {
-        let start = Instant::now();
+        let frame_time = Instant::now();
         state.window.swap_buffers();
 
         state.input.update(&state.window);
@@ -187,16 +120,33 @@ fn main() {
         let view_proj = proj * cam_trans_mat;
 
         let mut collide_mesh = mesh::Mesh::new();
+
         let mut ghost_mesh = mesh::Mesh::new();
         //if let Some((block,hit)) = ray::dda_3d(camera.pos,camera.dir, 1000.,&chunk_data) {
             //collide_mesh.join_with(&mesh::gen_cube(1,block.into()));
             //collide_mesh.join_with(&mesh::gen_icosahedron(0.10,hit,vec3!(1.,0.,1.)));
         //}
-        if let Some((node_pos,hit)) = ray::dda_3d_octree(camera.pos,camera.dir,100.,&octree) {
-            let hit_dir = hit_direction(hit,camera.dir);
-            collide_mesh.join_with(&mesh::gen_icosahedron(0.10,hit,vec3!(1.,0.,1.)));
-            ghost_mesh.join_with(&mesh::gen_cube(1,(node_pos - hit_dir.into() ).into(),vec3!(0.5,0.4,0.)));
-            //println!("dir: {:?}",hit_dir);
+        //if let Some((node_pos,hit)) = ray::dda_3d_octree(camera.pos,camera.dir,100.,&octree) {
+            //let hit_dir = hit_direction(hit,camera.dir);
+            //collide_mesh.join_with(&mesh::gen_icosahedron(0.10,hit,vec3!(1.,0.,1.)));
+            //ghost_mesh.join_with(&mesh::gen_cube(1,(node_pos - hit_dir.into() ).into(),vec3!(0.5,0.4,0.)));
+            ////println!("dir: {:?}",hit_dir);
+        //}
+        let start = Instant::now();
+        for _ in 0..1000 {
+            ray::ray_octree_dir(camera.pos,camera.dir,&octree);
+        }
+        println!("param ray time {:?}",start.elapsed()/1000);
+        let start = Instant::now();
+        for _ in 0..1000 {
+            ray::dda_3d_octree(camera.pos,camera.dir,1000.,&octree);
+        }
+        println!("dda ray time {:?}",start.elapsed()/1000);
+
+        if let Some((node,hit_dir)) = ray::ray_octree_dir(camera.pos,camera.dir,&octree){
+            //collide_mesh.join_with(&mesh::gen_icosahedron(0.10,hit,vec3!(1.,0.,1.)));
+            let hit_offset:IVec3 = hit_dir.into();
+            ghost_mesh.join_with(&mesh::gen_cube(node.size,(node.position - hit_offset * node.size).into(),vec3!(0.5,0.4,0.)));
         }
 
         let collide_vao = unsafe { utils::vao_from_mesh(&collide_mesh) };
@@ -227,9 +177,11 @@ fn main() {
             glEnable(GL_BLEND);
 
             glUseProgram(*solid_color_alpha_program);
-            glDepthFunc(GL_ALWAYS);
-            //octree_skeleton_vao.draw_elements(GL_LINES);
-            glDepthFunc(GL_LESS);
+            //glDepthFunc(GL_ALWAYS);
+            if state.octree_skeleton {
+                octree_skeleton_vao.draw_elements(GL_LINES);
+            }
+            //glDepthFunc(GL_LESS);
 
             glUseProgram(*solid_color_alpha_program);
             ghost_vao.draw_elements(GL_TRIANGLES);
@@ -250,8 +202,10 @@ fn main() {
                     match button {
                         MouseButton::Button1 => {
                             if let Some((pos,hit)) = ray::dda_3d_octree(camera.pos,camera.dir,100.,&octree) {
-                                let hit_dir = hit_direction(hit,camera.dir);
+                                let hit_dir = ray::hit_direction(hit,camera.dir);
+                                let start = std::time::Instant::now();
                                 octree.add_block(pos - hit_dir.into());
+                                println!("block added {:?}",start.elapsed());
 
                                 octree_skeleton_mesh = octree.gen_skeleton_mesh();
                                 octree_skeleton_vao = unsafe { utils::vao_from_mesh(&octree_skeleton_mesh) };
@@ -285,6 +239,9 @@ fn main() {
                         state.window.set_cursor_mode(glfw::CursorMode::Disabled);
                     }
                 }
+                Key::B => {
+                    state.octree_skeleton = !state.octree_skeleton;
+                }
                 Key::Y => {
                     state.wireframe = !state.wireframe;
                     unsafe { 
@@ -315,11 +272,11 @@ fn main() {
                 time::Duration::from_micros(
                     (1./FPS * 1e6 as f64).round() as u64
                 ).saturating_sub(
-                    start.elapsed()
+                    frame_time.elapsed()
                 )
         );
 
-        let elapsed = start.elapsed();
+        let elapsed = frame_time.elapsed();
         state.d_t = elapsed.as_micros() as f32 / 1000. ; // in millis
         
         let avrg = time_buffer.update(elapsed.as_micros());

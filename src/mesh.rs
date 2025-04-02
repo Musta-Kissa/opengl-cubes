@@ -26,7 +26,6 @@ impl Mesh {
         self.verts.extend_from_slice(&other.verts);
     }
 }
-use crate::octree::Octree;
 pub fn gen_cube_skeleton(size: i32,pos:IVec3) -> Mesh {
     let mut mesh = Mesh::new();
     let size = size as f32;

@@ -1,6 +1,4 @@
 use my_math::prelude::*;
-use gl33::*;
-use gl33::global_loader::*;
 
 use crate::mesh::gen_cube_skeleton;
 use crate::mesh::gen_cube;
@@ -88,10 +86,10 @@ impl OctreeNode {
             self.is_full = true;
             return;
         } 
-        if self.is_full {
-            assert!(self.children.is_none());
-            return;
-        }
+        //if self.is_full {
+            //assert!(self.children.is_none());
+            //return;
+        //}
         if self.children.is_none() {
             // is a leaf and not full so its empty => devide and call recursively
             assert!(self.children.is_none());
@@ -159,9 +157,6 @@ impl OctreeNode {
 pub fn pos_in_child(node: &OctreeNode,pos:IVec3) -> usize {
     let rel_pos = pos - node.position;
     let half_size = node.size / 2;
-    //if !inside_bouds(node,pos) {
-        //return 8;
-    //}
 
     let middle = ivec3!(half_size,half_size,half_size);
 

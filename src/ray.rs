@@ -6,10 +6,10 @@ use crate::octree::*;
 fn next_node(curr_quad: i32, txm: f32, tym: f32,tzm: f32) -> i32 {
     const EXIT: i32 = 8;
     let mut exit_idx = 2; // XY
-    if (txm < tym) {
-		if(txm < tzm){ exit_idx = 0}  // YZ plane
+    if txm < tym {
+		if txm < tzm { exit_idx = 0 }  // YZ plane
 	}else{
-		if(tym < tzm){ exit_idx = 1} // XZ plane
+		if tym < tzm { exit_idx = 1 } // XZ plane
 	}
 
     let exit_lookup = [
@@ -44,6 +44,75 @@ fn first_node (tx0: f32, ty0: f32, tz0: f32,txm: f32, tym: f32,tzm:f32) -> i32 {
     return out;
 }
 
+#[derive(Debug,Copy,Clone)]
+pub enum Dir {
+    X,
+    NegX,
+    Y,
+    NegY,
+    Z,
+    NegZ,
+}
+impl Into<Vec3> for Dir {
+    fn into(self) -> Vec3 {
+        match self {
+            Dir::X => Vec3::X,
+            Dir::NegX => Vec3::NEG_X,
+            Dir::Y => Vec3::Y,
+            Dir::NegY => Vec3::NEG_Y,
+            Dir::Z => Vec3::Z,
+            Dir::NegZ => Vec3::NEG_Z,
+        }
+    }
+}
+impl Into<IVec3> for Dir {
+    fn into(self) -> IVec3 {
+        match self {
+            Dir::X => IVec3::X,
+            Dir::NegX => IVec3::NEG_X,
+            Dir::Y => IVec3::Y,
+            Dir::NegY => IVec3::NEG_Y,
+            Dir::Z => IVec3::Z,
+            Dir::NegZ => IVec3::NEG_Z,
+        }
+    }
+}
+
+pub fn hit_direction(hit: Vec3, dir: Vec3) -> Dir {
+    let x = (hit.x - hit.x.round()).abs();
+    let y = (hit.y - hit.y.round()).abs();
+    let z = (hit.z - hit.z.round()).abs();
+
+    if x < y && x < z {
+        if dir.x < 0. {
+            return Dir::NegX;
+        } else {
+            return Dir::X;
+        }
+    } else if y < z {
+        if dir.y < 0. {
+            return Dir::NegY;
+        } else {
+            return Dir::Y;
+        }
+    } else {
+        if dir.z < 0. {
+            return Dir::NegZ;
+        } else {
+            return Dir::Z;
+        }
+    }
+}
+
+pub fn ray_octree_dir<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<(&'a OctreeNode,Dir)> {
+    if let Some((node,t)) = ray_octree(start,dir,chunk_data) {
+        let dir = hit_direction(start + dir * t,dir);
+        return Some((node,dir));
+    } else {
+        return None;
+    }
+}
+
 pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<(&'a OctreeNode,f32)> {
     let mut start = start;
 
@@ -64,7 +133,6 @@ pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<
         start.z = 2. * node_pos.z as f32 + node.size as f32 - start.z;
         mask |= 1;
     }
-    //println!("mask {:03b}",mask);
 
     let tx0 = (node_pos.x as f32 - start.x) / dir.x.abs();
     let ty0 = (node_pos.y as f32 - start.y) / dir.y.abs();
@@ -80,7 +148,6 @@ pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<
     let intersects: bool = t_min < t_max ;
 
     if !intersects {
-        println!("no intersection");
         return None;
     }
 
@@ -88,8 +155,14 @@ pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<
 
     fn proc_subtree(start: Vec3, dir: Vec3, mask: u8,node: &OctreeNode,
                     tx0:f32,ty0:f32,tz0:f32,tx1:f32,ty1:f32,tz1:f32) -> Option<(&OctreeNode,f32)> {
+        let t1_is_pos = tx1 >= 0. && ty1 >= 0. && tz1 >= 0. ;
+
+        if !t1_is_pos {
+            return None;
+        }
+
         if node.children.is_none() {
-            if node.is_full && ( tx1 >= 0. && ty1 >= 0. && tz1 >= 0.) {
+            if node.is_full && t1_is_pos {
                 if tx0 < 0. && ty0 < 0. && tz0 < 0.{
                     return Some((node,0.));
                 }else {
@@ -310,7 +383,7 @@ pub fn dda_3d_octree(start: Vec3, dir: Vec3, max_distance: f32,octree:&Octree) -
                             dir.z.signum() as i32
                         );
 
-    let mut t_delta = Vec3::new( 
+    let t_delta = Vec3::new( 
                             1. / dir.x.abs(), 
                             1. / dir.y.abs(), 
                             1. / dir.z.abs() 
@@ -389,7 +462,7 @@ pub fn dda_3d(start: Vec3, dir: Vec3, max_distance: f32,chunk_data:&Box<ChunkDat
                             dir.z.signum() as i32
                         );
 
-    let mut t_delta = Vec3::new( 
+    let t_delta = Vec3::new( 
                             1. / dir.x.abs(), 
                             1. / dir.y.abs(), 
                             1. / dir.z.abs() 

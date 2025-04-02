@@ -7,6 +7,7 @@ use std::mem::MaybeUninit;
 use std::time::Instant;
 
 use crate::utils::DIRECTIONS;
+use crate::octree::Octree;
 
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
@@ -16,6 +17,73 @@ pub const SEED: u64 = 1111;
 pub const SIZE: usize = 256;
 
 pub type ChunkData = [[[bool; SIZE]; SIZE]; SIZE];
+
+pub fn gen_chunk_octree_2d() -> Octree {
+    let start = Instant::now();
+    let mut octree = Octree::new(SIZE as i32,ivec3!(0,0,0));
+
+    let mut noise = FastNoiseLite::new(SEED as i32);
+    noise.set_noise_type(NoiseType::Perlin);
+    noise.set_frequency(0.015);
+
+    let get_height = |x,z| {
+        let n = noise.get_noise_2d(
+            x as f32 ,
+            z as f32 ,
+        );
+        n
+    };
+
+    for x in 0..SIZE as i32{
+        for z in 0..SIZE as i32{
+            let max_y = get_height(x,z) * 10. + 20.;
+            let mut y = 0;
+            while (y as f32) < max_y {
+                octree.add_block(ivec3!(x,y,z));
+                y += 1;
+            }
+        }
+    }
+    println!("time (octree): {:?}",start.elapsed());
+    return octree;
+}
+pub fn gen_chunk_octree() -> Octree {
+    let start = Instant::now();
+    let mut octree = Octree::new(SIZE as i32,ivec3!(0,0,0));
+
+    let mut noise = FastNoiseLite::new(SEED as i32);
+    noise.set_noise_type(NoiseType::Perlin);
+    noise.set_frequency(0.035);
+
+    let has_voxel = |x,y,z| {
+        let n = noise.get_noise_3d(
+            x as f32 ,
+            y as f32 ,
+            z as f32 ,
+        );
+        return n >= 0.
+    };
+
+    for x in 0..SIZE as i32{
+        for y in 0..SIZE as i32{
+            for z in 0..SIZE as i32{
+                if has_voxel(x,y,z) {
+                    octree.add_block(ivec3!(x,y,z));
+                }
+            }
+        }
+    }
+    println!("time (octree): {:?}",start.elapsed());
+    return octree;
+
+    //fill_node(&mut octree.head);
+//
+    //fn fill_node(node : &mut OctreeNode) {
+        //if node.children.is_none() {
+             //
+        //}
+    //}
+}
 
 pub fn gen_chunk_data() -> Box<ChunkData> {
     let start = Instant::now();
@@ -44,7 +112,7 @@ pub fn gen_chunk_data() -> Box<ChunkData> {
             }
         }
     }
-    println!("time: {:?}",start.elapsed());
+    println!("time (array): {:?}",start.elapsed());
     println!("cubes: {}",count);
     return unsafe { Box::from_raw(Box::into_raw(chunk_data) as *mut ChunkData) };
 }
