@@ -2,20 +2,20 @@ use my_math::prelude::*;
 use crate::utils;
 use crate::chunk;
 use crate::vertex;
-use crate::vertex::Vertex;
+use crate::vertex::*;
 
-pub struct Mesh {
-    pub verts: Vec<Vertex>,
+pub struct Mesh<T> {
+    pub verts: Vec<T>,
     pub indices: Vec<u32>,
 }
-impl Mesh {
-    pub fn new() -> Mesh {
+impl<T: VertexAttributes + Clone> Mesh<T> {
+    pub fn new() -> Mesh<T> {
         Mesh {
             verts: Vec::new(),
             indices: Vec::new(),
         }
     }
-    pub fn join_with(&mut self,other:&Mesh) {
+    pub fn join_with(&mut self,other:&Mesh<T>) {
         self.indices.extend_from_slice(other.indices
                                             .as_slice()
                                             .iter()
@@ -26,7 +26,7 @@ impl Mesh {
         self.verts.extend_from_slice(&other.verts);
     }
 }
-pub fn gen_cube_skeleton(size: i32,pos:IVec3) -> Mesh {
+pub fn gen_cube_skeleton(size: i32,pos:IVec3) -> Mesh<Vertex> {
     let mut mesh = Mesh::new();
     let size = size as f32;
     let pos:Vec3 = pos.into();
@@ -52,7 +52,7 @@ pub fn gen_cube_skeleton(size: i32,pos:IVec3) -> Mesh {
                          0,4, 2,6, 1,5, 3,7,];
     return mesh;
 }
-pub fn gen_cube(size: i32,pos:Vec3,col: Vec3) -> Mesh {
+pub fn gen_cube(size: i32,pos:Vec3,col: Vec3) -> Mesh<Vertex> {
     let mut mesh = Mesh::new();
     for dir in utils::DIRECTIONS {
         for v in chunk::gen_voxel_face(dir,0.,0.,0.) {
@@ -66,7 +66,7 @@ pub fn gen_cube(size: i32,pos:Vec3,col: Vec3) -> Mesh {
     mesh.indices = chunk::gen_indices(mesh.verts.len());
     return mesh;
 }
-pub fn gen_icosahedron(size: f32,pos: Vec3,col: Vec3) -> Mesh {
+pub fn gen_icosahedron(size: f32,pos: Vec3,col: Vec3) -> Mesh<Vertex> {
     let mut mesh = Mesh::new();
 
     let phi = (1.0 + f32::sqrt(5.0)) * 0.5; // golden ratio

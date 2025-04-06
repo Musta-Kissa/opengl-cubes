@@ -5,6 +5,12 @@ edition = "2021"
 
 [dependencies]
 fast-noise-lite-rs = "0.8.0"
-gl33 = "0.2.1"
+gl = "0.14.0"
+#gl33 = "0.2.1"
 glfw = "0.59.0"
 my_math = { path = "../my-math" }
+
+#[profile.release]
+#opt-level = 3  # Optimization level (default is 3)
+#debug = true   # Include debug information
+

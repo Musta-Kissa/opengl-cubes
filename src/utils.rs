@@ -3,9 +3,9 @@ use glfw::{fail_on_errors,SwapInterval,Action, Context, Glfw, Key, PRenderContex
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use gl33::*;
-use gl33::global_loader;
-use gl33::global_loader::*;
+//use gl33::*;
+//use gl33::global_loader;
+//use gl33::global_loader::*;
 
 use std::ptr::null_mut;
 use core::mem::size_of;
@@ -14,6 +14,35 @@ use crate::vertex::*;
 use crate::mesh::*;
 
 use my_math::prelude::*;
+use gl::types::GLenum;
+
+pub fn create_texture(width: u32, height: u32) -> u32 {
+    let mut texture: u32 = 0;
+    unsafe {
+        gl::GenTextures(1, &mut texture);
+        gl::BindTexture(gl::TEXTURE_2D, texture);
+        // Set texture parameters
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+        
+        // Create the texture with the appropriate format
+        gl::TexImage2D(
+            gl::TEXTURE_2D,
+            0,
+            gl::RGBA32F as i32, // Use RGBA32F for floating point
+            width as i32,
+            height as i32,
+            0,
+            gl::RGBA,
+            gl::FLOAT,
+            null_mut(), // No initial data
+        );
+    }
+    texture
+}
+
 
 #[derive(Clone,Copy)]
 pub struct Vao {
@@ -25,8 +54,8 @@ impl Vao {
         Vao { vao: 0, len }
     }
     pub unsafe fn draw_elements(&self,draw_type: GLenum) {
-        glBindVertexArray(self.vao);
-        glDrawElements(draw_type, self.len as i32 ,GL_UNSIGNED_INT,null_mut());
+        gl::BindVertexArray(self.vao);
+        gl::DrawElements(draw_type, self.len as i32 ,gl::UNSIGNED_INT,null_mut());
     }
 }
 use std::ops::Deref;
@@ -43,31 +72,33 @@ impl DerefMut for Vao {
     }
 }
 
-pub unsafe fn vao_from_mesh(mesh:&Mesh) -> Vao {
+pub unsafe fn vao_from_mesh<T: VertexAttributes>(mesh:&Mesh<T>) -> Vao {
     let mut vao = Vao::new(mesh.indices.len() as u32); 
     let mut vbo = 0;
     let mut ebo = 0;
 
-    glGenVertexArrays(1, &mut *vao);
-    glGenBuffers(1, &mut vbo);
-    glGenBuffers(1, &mut ebo);
+    gl::GenVertexArrays(1, &mut *vao);
+    gl::GenBuffers(1, &mut vbo);
+    gl::GenBuffers(1, &mut ebo);
 
-    glBindVertexArray(*vao);
+    gl::BindVertexArray(*vao);
 
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER,
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+    //println!("sending data");
+    gl::BufferData(gl::ARRAY_BUFFER,
         (mesh.verts.len() * size_of::<Vertex>()) as isize,
         mesh.verts.as_ptr() as *const _,
-        GL_STATIC_DRAW,
+        gl::STATIC_DRAW,
     );
+    //println!("done");
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
+    gl::BufferData(gl::ELEMENT_ARRAY_BUFFER,
         (size_of::<u32>() * mesh.indices.len()) as isize, 
         mesh.indices.as_ptr() as *const _, 
-        GL_STATIC_DRAW
+        gl::STATIC_DRAW
     );
-    Vertex::set_attribs();
+    T::set_attribs();
     vao
 }
 
@@ -123,8 +154,8 @@ impl InputTracker {
 
         let (mouse_x, mouse_y) = window.get_cursor_pos();
 
-        let center_x = (crate::RES * 16 / 9 / 2) as f64;
-        let center_y = (crate::RES / 2) as f64;
+        let center_x = (crate::WIDTH / 2) as f64;
+        let center_y = (crate::HEIGHT / 2) as f64;
 
         let delta_x = mouse_x   - center_x;
         let delta_y = (mouse_y  - center_y) * -1.;
@@ -139,24 +170,29 @@ impl InputTracker {
     }
 }
 
-pub unsafe fn init(res: u32) -> (Glfw,PWindow, glfw::GlfwReceiver<(f64, glfw::WindowEvent)>) {
+pub unsafe fn init(width: u32,height: u32) -> (Glfw,PWindow, glfw::GlfwReceiver<(f64, glfw::WindowEvent)>) {
     let mut glfw = glfw::init(fail_on_errors!()).unwrap();
     glfw.window_hint(glfw::WindowHint::DepthBits(Some(24)));
-    let (mut window, events) = glfw.create_window(res * 16 / 9, res , "Glfw Triangle", glfw::WindowMode::Windowed).unwrap();
+    glfw.window_hint(glfw::WindowHint::ContextVersion(4, 3)); 
+    glfw.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
+
+    let (mut window, events) = glfw.create_window(width, height , "Opengl Cubes", glfw::WindowMode::Windowed).unwrap();
 
     window.make_current();
     glfw.set_swap_interval(SwapInterval::None);
 
-    let w: *mut PRenderContext = &mut window.render_context() as *mut _ ;
-    global_loader::load_global_gl(&|s| w.as_mut().unwrap().get_proc_address(ptr_to_str(s)) as *const _);
+    //let w: *mut PRenderContext = &mut window.render_context() as *mut _ ;
+    //global_loader::load_global_gl(&|s| w.as_mut().unwrap().get_proc_address(ptr_to_str(s)) as *const _);
+    gl::load_with(|s| window.get_proc_address(s) as *const _);
 
-    glViewport(0, 0, (res * 16 / 9) as i32, res as i32);
 
-    glClearColor(0.2, 0.3, 0.3, 1.0);
-    glFrontFace(GL_CW);
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    gl::Viewport(0, 0, width as i32, height as i32);
+
+    gl::ClearColor(0.2, 0.3, 0.3, 1.0);
+    gl::FrontFace(gl::CW);
+    gl::Enable(gl::CULL_FACE);
+    gl::Enable(gl::DEPTH_TEST);
+    gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
 
     (glfw,window,events)
 }

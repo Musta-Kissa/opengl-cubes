@@ -7,20 +7,24 @@ use std::mem::MaybeUninit;
 use std::time::Instant;
 
 use crate::utils::DIRECTIONS;
-use crate::octree::Octree;
+
+use crate::octree_arr::Octree;
+//use crate::octree::Octree;
 
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
+
+use crate::octree_arr::DEVIDE_TIME;
 
 
 //const CHUNK_SIZE: usize = 32;
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 256;
+pub const SIZE: usize = 1 << 6;
 
 pub type ChunkData = [[[bool; SIZE]; SIZE]; SIZE];
 
 pub fn gen_chunk_octree_2d() -> Octree {
     let start = Instant::now();
-    let mut octree = Octree::new(SIZE as i32,ivec3!(0,0,0));
+    let mut octree = Octree::new(SIZE as u16,ivec3!(0,0,0));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
@@ -44,12 +48,16 @@ pub fn gen_chunk_octree_2d() -> Octree {
             }
         }
     }
+    octree.nodes.shrink_to_fit();
+    octree.nodes.reserve_exact(1000);
     println!("time (octree): {:?}",start.elapsed());
+    println!("devide (octree:) {:?}",unsafe { std::time::Duration::from_nanos(DEVIDE_TIME as u64) } );
+    //panic!();
     return octree;
 }
 pub fn gen_chunk_octree() -> Octree {
     let start = Instant::now();
-    let mut octree = Octree::new(SIZE as i32,ivec3!(0,0,0));
+    let mut octree = Octree::new(SIZE as u16,ivec3!(0,0,0));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
@@ -117,7 +125,7 @@ pub fn gen_chunk_data() -> Box<ChunkData> {
     return unsafe { Box::from_raw(Box::into_raw(chunk_data) as *mut ChunkData) };
 }
 
-pub fn gen_mesh(chunk_data: &Box<ChunkData>) -> Mesh {
+pub fn gen_mesh(chunk_data: &Box<ChunkData>) -> Mesh<Vertex> {
     let mut vert_pos: Vec<Vertex> = Vec::new();
 
     for x in 0..SIZE {

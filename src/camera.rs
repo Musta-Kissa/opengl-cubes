@@ -114,7 +114,7 @@ impl Default for Camera {
             up: vec3!(0., 1., 0.),
             pos: vec3!(1e-5,1e-5,-5. + 1e-5),
             dir: vec3!(1e-7,1e-7,1.).norm(),
-            speed: 0.005,
+            speed: 0.015,
             near: 0.1,
             far: 100.,
             fov: 60.,

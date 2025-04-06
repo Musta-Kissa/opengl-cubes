@@ -3,6 +3,7 @@ use my_math::prelude::*;
 use crate::mesh::gen_cube_skeleton;
 use crate::mesh::gen_cube;
 use crate::mesh::Mesh;
+use crate::vertex::Vertex;
 
 pub struct OctreeNode {
     pub is_full: bool,
@@ -21,7 +22,7 @@ impl OctreeNode {
             position: pos,
         }
     }
-    pub fn gen_skeleton_mesh(&self,mesh:&mut Mesh) {
+    pub fn gen_skeleton_mesh(&self,mesh:&mut Mesh<Vertex>) {
         if let Some(children) = &self.children {
             for child in children {
                 child.gen_skeleton_mesh(mesh);
@@ -29,7 +30,7 @@ impl OctreeNode {
         }
         mesh.join_with(&gen_cube_skeleton(self.size,self.position));
     }
-    pub fn gen_mesh(&self, mesh: &mut Mesh) {
+    pub fn gen_mesh(&self, mesh: &mut Mesh<Vertex>) {
         if let Some(children) = &self.children {
             for child in children {
                 child.gen_mesh(mesh);
@@ -260,12 +261,12 @@ impl Octree {
             curr = &children[child_idx];
         }
     }
-    pub fn gen_skeleton_mesh(&self) -> Mesh {
+    pub fn gen_skeleton_mesh(&self) -> Mesh<Vertex> {
         let mut mesh = Mesh::new();
         self.head.gen_skeleton_mesh(&mut mesh);
         mesh
     }
-    pub fn gen_mesh(&self) -> Mesh {
+    pub fn gen_mesh(&self) -> Mesh<Vertex> {
         let mut mesh = Mesh::new();
         self.head.gen_mesh(&mut mesh);
         mesh
