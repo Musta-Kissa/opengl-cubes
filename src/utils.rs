@@ -191,8 +191,8 @@ pub unsafe fn init(width: u32,height: u32) -> (Glfw,PWindow, glfw::GlfwReceiver<
     gl::ClearColor(0.2, 0.3, 0.3, 1.0);
     gl::FrontFace(gl::CW);
     gl::Enable(gl::CULL_FACE);
-    gl::Enable(gl::DEPTH_TEST);
-    gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+    //gl::Enable(gl::DEPTH_TEST);
+    //gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
 
     (glfw,window,events)
 }

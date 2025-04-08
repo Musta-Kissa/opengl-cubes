@@ -34,7 +34,7 @@ impl Camera {
         
         let (delta_x,delta_y) = keys.mouse_delta;
 
-        let adjusted_delta_y = delta_y as f32 * self.sensitivity * (d_t / 16.) * (self.fov / 60.);
+        let adjusted_delta_y = delta_y as f32 * self.sensitivity  * (self.fov / 60.);
 
         let max_delta_y = if (pitch + adjusted_delta_y as f64) >= Self::MAX_PITCH {
             Self::MAX_PITCH - pitch  // Only rotate up to 89
@@ -47,7 +47,7 @@ impl Camera {
             self.dir.rot_quat(max_delta_y as f32, self.dir.cross(self.up).norm());
         }
         if delta_x != 0. {
-            self.dir.rot_quat(delta_x as f32 * self.sensitivity * (d_t / 16.) * (self.fov / 60.), self.up);
+            self.dir.rot_quat(delta_x as f32 * self.sensitivity  * (self.fov / 60.), self.up);
         }
 
         for key in &keys.pressed {
@@ -114,7 +114,7 @@ impl Default for Camera {
             up: vec3!(0., 1., 0.),
             pos: vec3!(1e-5,1e-5,-5. + 1e-5),
             dir: vec3!(1e-7,1e-7,1.).norm(),
-            speed: 0.015,
+            speed: 0.035,
             near: 0.1,
             far: 100.,
             fov: 60.,

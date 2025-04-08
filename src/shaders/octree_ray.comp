@@ -2,13 +2,314 @@
 
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout (binding = 0, rgba32f) uniform image2D outputImage;
+layout (binding = 0, rgba32f) uniform image2D screen;
+
+uniform vec3 camera_pos;
+uniform vec3 camera_dir;
+uniform float fov;
+
+struct IVec3 {
+    int x;
+    int y;
+    int z;
+};
+
+struct OctreeNode {
+    int children_idx[8];
+    int size;
+    bool is_full;
+    bool has_children;
+
+    IVec3 position;
+};
+
+struct RayHit {
+    OctreeNode node;
+    // if t == -1 no hit
+    float t;
+};
+
+layout(std430, binding = 0) buffer OctreeBuffer {
+    OctreeNode octreeNodes[];
+};
+
+layout(std430, binding = 1) buffer DebugBuffer {
+    float debugNums[];
+};
+
+
+RayHit  ray_octree(vec3 start, vec3 dir);
+RayHit  proc_subtree(vec3 start, vec3 dir, int mask, int node_idx, float tx0,float ty0,float tz0,float tx1,float ty1,float tz1);
+int     next_node(int curr_quad, float txm, float tym,float tzm);
+int     first_node(float tx0, float ty0, float tz0,float txm, float tym,float tzm);
+vec3    hit_direction(vec3 hit, vec3 dir);
+
+int g_first_node;
 
 void main() {
     // Get the coordinates of the pixel to write
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
 
-    imageStore(outputImage, pixel_coords, vec4(normalize(vec2(pixel_coords)),0.,1.) );
-    //imageStore(outputImage, pixel_coords, vec4(1.,0.,0.,1.) );
+    vec2 res = vec2(imageSize(screen));
+
+	vec2 ndc = (vec2(pixel_coords) * 2 - res) / res;
+    ndc.x *= res.x / res.y;
+
+    //float fov = 62.0;
+
+    vec3 forward = camera_dir;
+    vec3 left   = normalize(cross(forward, vec3(0.,1.,0.)));
+    vec3 up     = cross(left,forward);
+
+    float scale = tan(radians(fov * 0.5));
+    vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
+
+    vec3  pixel = vec3(0.2, 0.3, 0.3);
+
+    RayHit ray_hit = ray_octree(camera_pos,ray_dir);
+    vec3 hit = camera_pos + ray_dir * ray_hit.t;
+
+    vec3 hit_dir = hit_direction(hit,ray_dir);
+
+    //vec3 light_dir = normalize(vec3(-1,-1,0));
+    vec3 light_dir = normalize(pixel);
+
+
+    if (ray_hit.t >= 0.) {
+        float ambient = 0.05;
+        float dot_light = dot(light_dir,hit_dir);
+        float ratio = (dot_light + 1.0) / 2.0;
+        pixel = (vec3(0,0,1) * ratio) + ambient;
+        //pixel = normalize(hit_dir + 1);
+    }
+    debugNums[0] = hit.t;
+
+
+    imageStore(screen, pixel_coords, vec4(pixel,1.0));
 }
 
+const uint STACK_SIZE = 23; // 2^10 == 1024 (max tree size)
+struct StackNode {
+    int node_idx;
+    float tx0;
+    float ty0;
+    float tz0;
+    float tx1;
+    float ty1;
+    float tz1;
+};
+
+
+RayHit ray_octree(vec3 start, vec3 dir) {
+    //let mut start = start;
+
+    int root_node_idx = 0;
+    OctreeNode node = octreeNodes[root_node_idx];
+    IVec3 node_pos = node.position;
+
+
+    int mask = 0;
+    if (dir.x < 0.) {
+        start.x = 2. * float(node_pos.x) + float(node.size) - start.x;
+        dir.x = abs(dir.x);
+        mask |= 4;
+    }
+    if (dir.y < 0.) {
+        start.y = 2. * float(node_pos.y) + float(node.size) - start.y;
+        dir.y = abs(dir.y);
+        mask |= 2;
+    }
+    if (dir.z < 0.) {
+        start.z = 2. * float(node_pos.z) + float(node.size) - start.z;
+        dir.z = abs(dir.z);
+        mask |= 1;
+    }
+
+    float tx0 = (float(node_pos.x) - start.x) / dir.x;
+    float ty0 = (float(node_pos.y) - start.y) / dir.y;
+    float tz0 = (float(node_pos.z) - start.z) / dir.z;
+
+    float tx1 = ( float(node_pos.x) + float(node.size) - start.x) / dir.x;
+    float ty1 = ( float(node_pos.y) + float(node.size) - start.y) / dir.y;
+    float tz1 = ( float(node_pos.z) + float(node.size) - start.z) / dir.z;
+
+    float t_min = max(tx0,max(ty0,tz0));
+    float t_max = min(tx1,min(ty1,tz1));
+
+    RayHit hit_out;
+    hit_out.t = -1.;
+
+    if (!(t_min < t_max)) {
+        return hit_out;
+    }
+
+    //return proc_subtree(start,dir,mask,root_node_idx ,tx0,ty0,tz0,tx1,ty1,tz1);
+    //RayHit proc_subtree(vec3 start, vec3 dir, int mask, int node_idx, float tx0,float ty0,float tz0,float tx1,float ty1,float tz1) {
+
+    int stack_ptr = 0;
+    StackNode stack[STACK_SIZE];
+    stack[stack_ptr] =  StackNode(root_node_idx,tx0,ty0,tz0,tx1,ty1,tz1);
+
+    int node_idx;
+    while (stack_ptr >= 0) {
+        StackNode stack_state = stack[stack_ptr];
+        stack_ptr--;
+
+        node_idx = stack_state.node_idx;
+        tx0 = stack_state.tx0;
+        ty0 = stack_state.ty0;
+        tz0 = stack_state.tz0;
+        tx1 = stack_state.tx1;
+        ty1 = stack_state.ty1;
+        tz1 = stack_state.tz1;
+
+        bool t1_is_pos = (tx1 >= 0. && ty1 >= 0. && tz1 >= 0.);
+
+        if (!t1_is_pos) {
+            continue;
+        }
+
+
+        OctreeNode node = octreeNodes[node_idx];
+
+        if (!node.has_children) {
+            if (node.is_full && t1_is_pos) {
+                if (tx0 < 0. && ty0 < 0. && tz0 < 0.) {
+                    return RayHit(node,0.);
+                } else {
+                    float t_min = max(tx0,max(ty0,tz0));
+                    return RayHit(node,t_min);
+                }
+            } else {
+                continue;
+            }
+        }
+
+        float txm = (tx0 + tx1) /2.;
+        float tym = (ty0 + ty1) /2.;
+        float tzm = (tz0 + tz1) /2.;
+
+        int curr_node = first_node(tx0,ty0,tz0,txm,tym,tzm);
+
+        StackNode node_buff[4];
+        int node_buff_ptr = 0;
+
+        int children_idx[8] = node.children_idx;
+
+        while (curr_node < 8) {
+            int child_idx = children_idx[curr_node^mask];
+            RayHit hit;
+            switch (curr_node) {
+                case 0 : 
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, tx0, ty0, tz0, txm, tym, tzm);
+                    curr_node = next_node(curr_node,txm,tym,tzm);
+                    break;
+                case 1 : 
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, tx0,ty0,tzm,txm,tym,tz1);
+                    curr_node = next_node(curr_node,txm,tym,tz1);
+                    break;
+                case 2 :
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, tx0, tym, tz0, txm, ty1, tzm);
+                    curr_node = next_node(curr_node,txm,ty1,tzm);
+                    break;
+                case 3 :
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, tx0, tym, tzm, txm, ty1, tz1);
+                    curr_node = next_node(curr_node,txm, ty1, tz1);
+                    break;
+                case 4 :
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, txm, ty0, tz0, tx1, tym, tzm);
+                    curr_node = next_node(curr_node,tx1,  tym,  tzm);
+                    break;
+                case 5 :
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, txm, ty0, tzm, tx1, tym, tz1);
+                    curr_node = next_node( curr_node,tx1,  tym,  tz1);
+                    break;
+                case 6 :
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, txm, tym, tz0, tx1, ty1, tzm);
+                    curr_node = next_node( curr_node,tx1,  ty1,  tzm );
+                    break;
+                case 7 :
+                    node_buff[node_buff_ptr++] = StackNode(child_idx, txm, tym, tzm, tx1, ty1, tz1 );
+                    curr_node = 8;
+                    break;
+            }
+        }
+        //for ( int i = node_buff_ptr-1; i >= 0 ; i--) {
+        while (node_buff_ptr > 0) {
+            //node_buff_ptr--;
+            stack[++stack_ptr] = node_buff[--node_buff_ptr];
+            //stack_ptr++;
+        }
+    }
+    return hit_out;
+}
+
+
+
+const int EXIT = 8;
+const int exit_lookup[][] = int[8][3](
+        int[](  4,   2,    1  ),
+        int[](  5,   3,   EXIT),
+        int[](  6,  EXIT,  3  ),
+        int[](  7,  EXIT, EXIT),
+        int[](EXIT,  6,    5  ),
+        int[](EXIT,  7,   EXIT),
+        int[](EXIT, EXIT,  7  ),
+        int[](EXIT, EXIT, EXIT)
+);
+
+
+int next_node(int curr_quad,float txm,float tym,float tzm) {
+    int exit_idx = 2; // XY
+    if (txm < tym) {
+		if (txm < tzm) { exit_idx = 0; }  // YZ plane
+	} else {
+		if (tym < tzm) { exit_idx = 1; } // XZ plane
+	}
+
+    return exit_lookup[curr_quad][exit_idx];
+}
+
+int first_node (float tx0,float ty0,float tz0,float txm,float tym,float tzm) {
+    int out_idx = 0;
+    if (tx0 > ty0 && tx0 > tz0) {
+        // YZ plane
+        if (tym < tx0) { out_idx |= 2; }
+        if (tzm < tx0) { out_idx |= 1; }
+    } else if (ty0 > tz0) {
+        // XZ plane
+        if (txm < ty0) { out_idx |= 4; }
+        if (tzm < ty0) { out_idx |= 1; }
+    } else {
+        // XY plane
+        if (txm < tz0) { out_idx |= 4; }
+        if (tym < tz0) { out_idx |= 2; }
+    }
+    return out_idx;
+}
+
+vec3 hit_direction(vec3 hit, vec3 dir) {
+    float x = abs(hit.x - round(hit.x));
+    float y = abs(hit.y - round(hit.y));
+    float z = abs(hit.z - round(hit.z));
+
+    if (x < y && x < z) {
+        if (dir.x < 0.) {
+            return vec3(-1,0,0);
+        } else {
+            return vec3(1,0,0);
+        }
+    } else if (y < z) {
+        if (dir.y < 0.) {
+            return vec3(0,-1,0);
+        } else {
+            return vec3(0,1,0);
+        }
+    } else {
+        if (dir.z < 0.) {
+            return vec3(0,0,-1);
+        } else {
+            return vec3(0,0,1);
+        }
+    }
+}

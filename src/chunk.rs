@@ -8,23 +8,23 @@ use std::time::Instant;
 
 use crate::utils::DIRECTIONS;
 
-use crate::octree_arr::Octree;
+use crate::octree::Octree;
 //use crate::octree::Octree;
 
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
-use crate::octree_arr::DEVIDE_TIME;
+use crate::octree::DEVIDE_TIME;
 
 
 //const CHUNK_SIZE: usize = 32;
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 1 << 6;
+pub const SIZE: usize = 1 << 8;
 
 pub type ChunkData = [[[bool; SIZE]; SIZE]; SIZE];
 
 pub fn gen_chunk_octree_2d() -> Octree {
     let start = Instant::now();
-    let mut octree = Octree::new(SIZE as u16,ivec3!(0,0,0));
+    let mut octree = Octree::new(SIZE as u32,ivec3!(0,0,0));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
@@ -57,7 +57,7 @@ pub fn gen_chunk_octree_2d() -> Octree {
 }
 pub fn gen_chunk_octree() -> Octree {
     let start = Instant::now();
-    let mut octree = Octree::new(SIZE as u16,ivec3!(0,0,0));
+    let mut octree = Octree::new(SIZE as u32,ivec3!(0,0,0));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);

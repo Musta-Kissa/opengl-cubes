@@ -8,7 +8,6 @@ mod utils;
 mod shader;
 mod camera;
 mod octree;
-mod octree_arr;
 
 #[macro_use]
 extern crate my_math;
@@ -28,12 +27,10 @@ use crate::mesh::Mesh;
 
 use camera::Camera;
 
-mod ray_arr;
-//mod ray;
-use ray_arr as ray;
+mod ray;
 
-pub const HEIGHT: u32 = 600;
-pub const WIDTH: u32 = HEIGHT * 16/9;
+pub const HEIGHT: u32 = 896;
+pub const WIDTH: u32 = 1600;
 
 pub const FPS: f64 = 60.;
 
@@ -67,43 +64,41 @@ impl AppState {
 const MAGENTA:&str = "\x1b[35m";
 const GREEN:&str = "\x1b[32m";
 const RESET_COL:&str = "\x1b[0m";
+fn clear_screen() {
+    use std::io::Write;
+    print!("\x1b[2J\x1b[H");
+    std::io::stdout().flush().unwrap();
+}
+
 
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
     let mut state = AppState::with_window(win);
     
     let mut octree = chunk::gen_chunk_octree_2d();
+    //let mut octree = octree::Octree::new(1 << 2,ivec3!(0,0,0));
 
     let mut octree_mesh = octree.gen_mesh();
     let mut octree_skeleton_mesh = octree.gen_skeleton_mesh();
+
 
     let mut octree_vao = unsafe { utils::vao_from_mesh(&octree_mesh) };
     let mut octree_skeleton_vao = unsafe { utils::vao_from_mesh(&octree_skeleton_mesh) };
 
     // Load shaders
-    let (program,solid_color_program,solid_color_alpha_program,compute_program,uv_passthrough_program) = unsafe {
+    let (compute_program,uv_passthrough_program) = unsafe {
         use crate::shader::*;
-        let perspective_vert            = compile_shader(gl::VERTEX_SHADER,"./shaders/3d_perspective.vert");
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
-        let dir_light_frag              = compile_shader(gl::FRAGMENT_SHADER,"./shaders/dir_light.frag");
-        let solid_color_frag            = compile_shader(gl::FRAGMENT_SHADER,"./shaders/pure_color.frag");
-        let solid_color_alpha_frag      = compile_shader(gl::FRAGMENT_SHADER,"./shaders/pure_color_alpha.frag");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         let compute_shader              = compile_shader(gl::COMPUTE_SHADER,"./shaders/octree_ray.comp");
 
-        let program                     = ShaderProgram::create_program(perspective_vert,dir_light_frag);
-        let solid_color_program         = ShaderProgram::create_program(perspective_vert,solid_color_frag);
-        let solid_color_alpha_program   = ShaderProgram::create_program(perspective_vert,solid_color_alpha_frag);
         let uv_passthrough_program      = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
         let compute_program             = ShaderProgram::create_compute(compute_shader);
 
-        gl::DeleteShader(perspective_vert);
         gl::DeleteShader(uv_passthrough_vert);
-        gl::DeleteShader(dir_light_frag);
-        gl::DeleteShader(solid_color_frag);
-        gl::DeleteShader(solid_color_alpha_frag);
+        gl::DeleteShader(texturig_frag);
         gl::DeleteShader(compute_shader);
-        (program,solid_color_program,solid_color_alpha_program,compute_program,uv_passthrough_program)
+        (compute_program,uv_passthrough_program)
     };
 
     let mut screen_mesh = Mesh::new();
@@ -120,8 +115,36 @@ fn main() {
     ];
     let screen_vao = unsafe { vao_from_mesh(&screen_mesh) };
 
-    let mut texture = create_texture(WIDTH,HEIGHT);
+    let texture = create_texture(WIDTH,HEIGHT);
     unsafe { gl::BindImageTexture(0, texture, 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::RGBA32F) };
+    let mut ssbo = 0;
+    let mut debug_ssbo = 0;
+    let mut debug_data = vec![0f32;1024];
+
+    unsafe {
+        use std::mem;
+        use crate::octree::OctreeNode;
+
+        gl::GenBuffers(1, &mut ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            (octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
+            octree.nodes.as_ptr() as *const _,
+            gl::DYNAMIC_DRAW,
+        );
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
+
+        gl::GenBuffers(1, &mut debug_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            (1024 * mem::size_of::<i32>()) as isize,
+            debug_data.as_ptr() as *const _,
+            gl::DYNAMIC_DRAW,
+        );
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, debug_ssbo);
+    }
     
     state.window.set_size_polling(true);
     state.window.set_key_polling(true);
@@ -133,6 +156,7 @@ fn main() {
     while !state.window.should_close() {
         let frame_time = Instant::now();
         state.window.swap_buffers();
+        let test_start = Instant::now();
 
         state.input.update(&state.window);
         state.camera.update_with_input(&state.input,state.d_t);
@@ -146,98 +170,37 @@ fn main() {
 
 
         let camera = &state.camera;
-        let cam_trans_mat = matrix::look_at_lh(camera.pos, camera.pos + camera.dir, camera.up);
-        let proj = my_math::matrix::proj_mat_wgpu(camera.fov, 16. / 9., camera.near, camera.far);
-        let view_proj = proj * cam_trans_mat;
-
-        let mut collide_mesh = mesh::Mesh::new();
-
-        let mut ghost_mesh: Mesh<Vertex> = Mesh::new();
-        println!("cap left: {} size: {} Mib used size: {}",
-                    octree.nodes.capacity() - octree.nodes.len(),
-                    std::mem::size_of::<octree_arr::OctreeNode>()  as f32* octree.nodes.capacity()  as f32/ (1024 * 1024) as f32,
-                    std::mem::size_of::<octree_arr::OctreeNode>()  as f32* octree.nodes.len()  as f32/ (1024 * 1024) as f32);
-                    
-        let start = Instant::now();
-        for _ in 0..1000 {
-            ray::ray_octree_dir(camera.pos,camera.dir,&octree);
-        }
-        println!("param ray time {:?}",start.elapsed()/1000);
-        let start = Instant::now();
-        for _ in 0..1000 {
-            ray::dda_3d_octree(camera.pos,camera.dir,1000.,&octree);
-        }
-        println!("dda ray time {:?}",start.elapsed()/1000);
-
-        if let Some((node,t)) = ray::ray_octree(camera.pos,camera.dir,&octree){
-            let cube_color = vec3!(0.,0.,0.7);
-
-            let hit = camera.pos + camera.dir * t;
-            let hit_dir = ray::hit_direction(hit,camera.dir);
-
-            //let ambient = 0.05;
-            //let dot_light = state.light_dir.norm().dot((-hit_dir).into());
-            //let ratio = (dot_light + 1.0) / 2.0;
-            //let frag_color = ((cube_color * ratio) + vec3!(ambient,ambient,ambient));
-
-
-            collide_mesh.join_with(&mesh::gen_icosahedron(0.10,hit,vec3!(1.,0.,1.)));
-
-            //let hit_offset:IVec3 = hit_dir.into();
-            //ghost_mesh.join_with(&mesh::gen_cube(node.size,(node.position - hit_offset * node.size).into(),vec3!(0.5,0.4,0.)));
-        }
-
-        let collide_vao = unsafe { utils::vao_from_mesh(&collide_mesh) };
-        let ghost_vao = unsafe { utils::vao_from_mesh(&ghost_mesh) };
-
-
         // RENDER 
+        let start_compute = Instant::now();
         unsafe {
-            let transform_mat = view_proj.to_opengl();
 
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-            gl::UseProgram(*program);
-            program.set_mat4("transform",transform_mat.as_ptr() as *const _);
-            program.set_vec3("light_dir",state.light_dir);
+            gl::Clear(0);
+            gl::UseProgram(*compute_program);
+            compute_program.set_float("fov",camera.fov);
+            compute_program.set_vec3("camera_pos",camera.pos);
+            compute_program.set_vec3("camera_dir",camera.dir);
 
-            gl::UseProgram(*solid_color_program);
-            solid_color_program.set_mat4("transform",transform_mat.as_ptr() as *const _);
-
-            gl::UseProgram(*solid_color_alpha_program);
-            solid_color_alpha_program.set_mat4("transform",transform_mat.as_ptr() as *const _);
-
-
-            gl::UseProgram(*program);
-            octree_vao.draw_elements(gl::TRIANGLES);
-            gl::UseProgram(*solid_color_program);
-            collide_vao.draw_elements(gl::TRIANGLES);
-
-            //chunk_vao.draw_elements(gl::TRIANGLES);
-
-            gl::Enable(gl::BLEND);
-
-            gl::UseProgram(*solid_color_alpha_program);
-            //gl::DepthFunc(gl::ALWAYS);
-            if state.octree_skeleton {
-                octree_skeleton_vao.draw_elements(gl::LINES);
-            }
-            //gl::DepthFunc(gl::LESS);
-
-            gl::UseProgram(*solid_color_alpha_program);
-            ghost_vao.draw_elements(gl::TRIANGLES);
-            gl::Disable(gl::BLEND);
-            
-            //gl::UseProgram(*compute_program);
-            //gl::DispatchCompute(WIDTH /16, HEIGHT /16, 1);
+            gl::DispatchCompute((WIDTH /16), 
+                                (HEIGHT/16), 1);
 
             //gl::MemoryBarrier(gl::SHADER_IMAGE_ACCESS_BARRIER_BIT);
-            //gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+           
+            //Draw texture
+            gl::UseProgram(*uv_passthrough_program);
+            screen_vao.draw_elements(gl::TRIANGLES);
 
-            // Draw texture
-            //gl::UseProgram(*uv_passthrough_program);
-            //screen_vao.draw_elements(gl::TRIANGLES);
-
+            //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+            //gl::GetBufferSubData(
+                //gl::SHADER_STORAGE_BUFFER,
+                //0,
+                //(debug_data.len() * std::mem::size_of::<i32>()) as _,
+                //debug_data.as_mut_ptr() as *mut _,
+            //);
+            //println!("{}debug t       {}{}",MAGENTA,debug_data[0],RESET_COL);
+            
         }
+        //println!("compute ({:?})",start_compute.elapsed());
 
         glfw.poll_events();
         for (_ ,event) in glfw::flush_messages(&events) {
@@ -258,19 +221,21 @@ fn main() {
                                     (pos,_) =  ray::dda_3d_octree(hit,camera.dir,node.size as f32 *2.,&octree).unwrap();
                                 }
                                 let hit_dir = ray::hit_direction(hit,camera.dir);
-                                let start = std::time::Instant::now();
                                 if !octree.add_block(pos - hit_dir.into()) {
                                     break;
                                 }
-                                //println!("regenerating skeleton mesh");
-                                octree_skeleton_mesh = octree.gen_skeleton_mesh();
-                                //println!("regenerating skeleton vao");
-                                octree_skeleton_vao = unsafe { utils::vao_from_mesh(&octree_skeleton_mesh) };
-                                //println!("regenerating octree mesh");
-                                octree_mesh = octree.gen_mesh();
-                                //println!("regenerating octree vao");
-                                octree_vao = unsafe { utils::vao_from_mesh(&octree_mesh) };
-                                //println!("finnished");
+                                unsafe {
+                                    use std::mem;
+                                    use crate::octree::OctreeNode;
+                                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
+                                    gl::BufferData(
+                                        gl::SHADER_STORAGE_BUFFER,
+                                        (octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
+                                        octree.nodes.as_ptr() as *const _,
+                                        gl::DYNAMIC_DRAW,
+                                    );
+                                    gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
+                                }
                             }
                         }
                         MouseButton::Button2 => {
@@ -278,16 +243,18 @@ fn main() {
                                 if !octree.remove_block(pos) {
                                     break;
                                 }
-
-                                //println!("regenerating skeleton mesh");
-                                octree_skeleton_mesh = octree.gen_skeleton_mesh();
-                                //println!("regenerating skeleton vao");
-                                octree_skeleton_vao = unsafe { utils::vao_from_mesh(&octree_skeleton_mesh) };
-                                //println!("regenerating octree mesh");
-                                octree_mesh = octree.gen_mesh();
-                                //println!("regenerating octree vao");
-                                octree_vao = unsafe { utils::vao_from_mesh(&octree_mesh) };
-                                //println!("finnished");
+                                unsafe {
+                                    use std::mem;
+                                    use crate::octree::OctreeNode;
+                                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
+                                    gl::BufferData(
+                                        gl::SHADER_STORAGE_BUFFER,
+                                        (octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
+                                        octree.nodes.as_ptr() as *const _,
+                                        gl::DYNAMIC_DRAW,
+                                    );
+                                    gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
+                                }
                             }
                         }
                         _ => (),
@@ -334,20 +301,31 @@ fn main() {
             }
         }
 
+
         /////////////////////////////////////////////////////////////////////////////////////////////////////////
-        thread::sleep(
-                time::Duration::from_micros(
-                    (1./FPS * 1e6 as f64).round() as u64
-                ).saturating_sub(
-                    frame_time.elapsed()
-                )
-        );
+        //thread::sleep(
+                //time::Duration::from_micros(
+                    //(1./FPS * 1e6 as f64).round() as u64
+                //).saturating_sub(
+                    //frame_time.elapsed()
+                //)
+        //);
 
         let elapsed = frame_time.elapsed();
-        state.d_t = elapsed.as_micros() as f32 / 1000. ; // in millis
+        state.d_t = elapsed.as_nanos() as f32 / 1000_000. ; // in millis
         
         let avrg = time_buffer.update(elapsed.as_micros());
         state.window.set_title(&format!("{:.2}fps ({:?})",1./(avrg / 1000_000.),elapsed));
     }
+}
+
+use std::ffi::CString;
+#[allow(non_snake_case,warnings)]
+pub unsafe fn GetUniformLocation(program: u32,name: &str) -> i32 {
+    let out = gl::GetUniformLocation(program, CString::new(name).unwrap().as_ptr() as *const _);
+    if out == -1 {
+        println!("COULDNT FIND UNIFORM: {}",name) ;
+    }
+    out
 }
 

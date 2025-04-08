@@ -49,6 +49,9 @@ impl ShaderProgram {
     pub unsafe fn set_vec3(self,name: &str,val: Vec3) {
         gl::Uniform3f(GetUniformLocation(self.0,name), val.x, val.y, val.z);
     }
+    pub unsafe fn set_float(self,name: &str, val: f32) {
+        gl::Uniform1f(GetUniformLocation(self.0,name), val);
+    }
     pub unsafe fn set_mat4(self,name: &str, ptr: *const f32) {
         gl::UniformMatrix4fv(GetUniformLocation(self.0,name), 1, 0, ptr);
     }

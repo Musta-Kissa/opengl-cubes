@@ -53,6 +53,20 @@ pub enum Dir {
     Z,
     NegZ,
 }
+impl std::ops::Neg for Dir {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Dir::X => Dir::NegX,
+            Dir::NegX => Dir::X,
+            Dir::Y => Dir::NegY,
+            Dir::NegY => Dir::Y,
+            Dir::Z => Dir::NegZ,
+            Dir::NegZ => Dir::Z,
+        }
+    }
+}
 impl Into<Vec3> for Dir {
     fn into(self) -> Vec3 {
         match self {
@@ -112,13 +126,151 @@ pub fn ray_octree_dir<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Opt
         return None;
     }
 }
+//struct StackNode {
+    //start: Vec3, dir: Vec3, mask: u8, octree: &Octree, node_idx: i32,
+    //tx0:f32,ty0:f32,tz0:f32,tx1:f32,ty1:f32,tz1:f32,
+//}
+//impl StackNode {
+    //fn new( start: Vec3, dir: Vec3, mask: u8, octree: &Octree, node_idx: i32,
+            //tx0:f32,ty0:f32,tz0:f32,tx1:f32,ty1:f32,tz1:f32) -> StackNode {
+        //StackNode {
+            //start, dir, mask, octree, node_idx,
+            //tx0,ty0,tz0,tx1,ty1,tz1,
+//
+        //}
+    //}
+//}
+pub static mut MAX_STACK_DEPTH: usize = 0;
 
-pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<(&'a OctreeNode,f32)> {
+pub fn ray_octree_stack<'a>(start: Vec3, dir: Vec3, octree: &'a Octree) -> Option<(&'a OctreeNode,f32)> {
     let mut start = start;
 
-    let node = &chunk_data.head;
+    let root_node_idx = 0;
+    let node = &octree.nodes[root_node_idx];
 
-    let node_pos = node.position ;
+    let node_pos = node.position;
+
+    let mut mask:u8 = 0;
+    if dir.x < 0. {
+        start.x = 2. * node_pos.x as f32 + node.size as f32 - start.x;
+        mask |= 4;
+    }
+    if dir.y < 0. {
+        start.y = 2. * node_pos.y as f32 + node.size as f32 - start.y;
+        mask |= 2;
+    }
+    if dir.z < 0. {
+        start.z = 2. * node_pos.z as f32 + node.size as f32 - start.z;
+        mask |= 1;
+    }
+
+    let tx0 = (node_pos.x as f32 - start.x) / dir.x.abs();
+    let ty0 = (node_pos.y as f32 - start.y) / dir.y.abs();
+    let tz0 = (node_pos.z as f32 - start.z) / dir.z.abs();
+
+    let tx1 = (node_pos.x as f32 + node.size as f32 - start.x) / dir.x.abs();
+    let ty1 = (node_pos.y as f32 + node.size as f32 - start.y) / dir.y.abs();
+    let tz1 = (node_pos.z as f32 + node.size as f32 - start.z) / dir.z.abs();
+
+    let t_min = tx0.max(ty0).max(tz0);
+    let t_max = tx1.min(ty1).min(tz1);
+
+    let intersects: bool = t_min < t_max ;
+
+    if !intersects {
+        return None;
+    }
+    
+    let mut stack: Vec<(i32,f32,f32,f32,f32,f32,f32)> = Vec::new();
+    stack.push((root_node_idx as i32, tx0, ty0, tz0, tx1, ty1, tz1));
+    
+    while let Some((node_idx,tx0,ty0,tz0,tx1,ty1,tz1)) = stack.pop() {
+        let t1_is_pos = tx1 >= 0. && ty1 >= 0. && tz1 >= 0. ;
+
+        if !t1_is_pos {
+            continue;
+        }
+
+        let node = &octree.nodes[node_idx as usize];
+        if !node.has_children {
+            if node.is_full && t1_is_pos {
+                if tx0 < 0. && ty0 < 0. && tz0 < 0.{
+                    return Some((node,0.));
+                }else {
+                    let t_min = tx0.max(ty0).max(tz0);
+                    return Some((node,t_min));
+                }
+            } else {
+                continue;
+            }
+        }
+
+        let txm = (tx0 + tx1) /2.;
+        let tym = (ty0 + ty1) /2.;
+        let tzm = (tz0 + tz1) /2.;
+
+        let mut curr_node = first_node(tx0,ty0,tz0,txm,tym,tzm);
+
+        let children_idx = node.children_idx;
+        //println!("hit index {curr_node}");
+        let mut node_buffer = Vec::new();
+
+        while curr_node < 8 {
+            let child_idx = children_idx[curr_node as usize ^ mask as usize];
+            match curr_node {
+                0 => {
+                    node_buffer.push((child_idx, tx0, ty0, tz0, txm, tym, tzm));
+                    curr_node = next_node(curr_node,txm,tym,tzm);
+                },
+                1 => {
+                    node_buffer.push((child_idx, tx0,ty0,tzm,txm,tym,tz1));
+                    curr_node = next_node(curr_node,txm,tym,tz1);
+                },
+                2 => {
+                    node_buffer.push((child_idx, tx0, tym, tz0, txm, ty1, tzm));
+                    curr_node = next_node(curr_node,txm,ty1,tzm);
+                },
+                3 => {
+                    node_buffer.push((child_idx, tx0, tym, tzm, txm, ty1, tz1));
+                    curr_node = next_node (curr_node,txm, ty1, tz1,);
+                },
+                4 => {
+                    node_buffer.push((child_idx, txm, ty0, tz0, tx1, tym, tzm));
+                    curr_node = next_node (curr_node,tx1,  tym,  tzm);
+                },
+                5 => {
+                    node_buffer.push((child_idx, txm, ty0, tzm, tx1, tym, tz1));
+                    curr_node = next_node ( curr_node,tx1,  tym,  tz1);
+                },
+                6 => {
+                    node_buffer.push((child_idx, txm, tym, tz0, tx1, ty1, tzm));
+                    curr_node = next_node ( curr_node,tx1,  ty1,  tzm );
+                },
+                7 => {
+                    stack.push((child_idx, txm, tym, tzm, tx1, ty1, tz1 ));
+                    curr_node = 8;
+                },
+                _ => panic!(),
+            }
+        }
+        unsafe {
+            if stack.len() - 1 >  MAX_STACK_DEPTH {
+                MAX_STACK_DEPTH = stack.len() -1;
+            }
+        }
+        while let Some(args) = node_buffer.pop() {
+            stack.push(args); 
+        }
+    }
+    return None;
+}
+pub fn ray_octree_max<'a>(start: Vec3, dir: Vec3, octree: &'a Octree, max: f32) -> Option<(&'a OctreeNode,f32)> {
+    let mut start = start;
+
+    let root_node_idx = 0;
+    let node = &octree.nodes[root_node_idx];
+
+    let node_pos = node.position;
 
     let mut mask:u8 = 0;
     if dir.x < 0. {
@@ -151,17 +303,19 @@ pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<
         return None;
     }
 
-    return proc_subtree(start,dir,mask,node,tx0,ty0,tz0,tx1,ty1,tz1);
+    return proc_subtree(start,dir,mask,octree,max,root_node_idx as i32,tx0,ty0,tz0,tx1,ty1,tz1);
 
-    fn proc_subtree(start: Vec3, dir: Vec3, mask: u8,node: &OctreeNode,
+    fn proc_subtree(start: Vec3, dir: Vec3, mask: u8,octree: &Octree, max: f32,node_idx: i32,
                     tx0:f32,ty0:f32,tz0:f32,tx1:f32,ty1:f32,tz1:f32) -> Option<(&OctreeNode,f32)> {
         let t1_is_pos = tx1 >= 0. && ty1 >= 0. && tz1 >= 0. ;
 
-        if !t1_is_pos {
+                     
+        if !t1_is_pos || tx0.max(ty0).max(tz0) > max {
             return None;
         }
 
-        if node.children.is_none() {
+        let node = &octree.nodes[node_idx as usize];
+        if !node.has_children {
             if node.is_full && t1_is_pos {
                 if tx0 < 0. && ty0 < 0. && tz0 < 0.{
                     return Some((node,0.));
@@ -180,57 +334,56 @@ pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<
 
         let mut curr_node = first_node(tx0,ty0,tz0,txm,tym,tzm);
 
-        let children = &node.children.as_ref().unwrap();
+        let children_idx = node.children_idx;
         //println!("hit index {curr_node}");
 
         while curr_node < 8 {
-            let child = &children[curr_node as usize ^ mask as usize];
+            let child_idx = children_idx[curr_node as usize ^ mask as usize];
             match curr_node {
                 0 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, tx0, ty0, tz0, txm, tym, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, tx0, ty0, tz0, txm, tym, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node(curr_node,txm,tym,tzm);
                 },
                 1 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, 
-                                                        tx0,ty0,tzm,txm,tym,tz1) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, tx0,ty0,tzm,txm,tym,tz1) {
                         return Some((hit,t));
                     }
                     curr_node = next_node(curr_node,txm,tym,tz1);
                 },
                 2 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, tx0, tym, tz0, txm, ty1, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, tx0, tym, tz0, txm, ty1, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node(curr_node,txm,ty1,tzm);
                 },
                 3 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, tx0, tym, tzm, txm, ty1, tz1) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, tx0, tym, tzm, txm, ty1, tz1) {
                         return Some((hit,t));
                     }
                     curr_node = next_node (curr_node,txm, ty1, tz1,);
                 },
                 4 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, ty0, tz0, tx1, tym, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, txm, ty0, tz0, tx1, tym, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node (curr_node,tx1,  tym,  tzm);
                 },
                 5 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, ty0, tzm, tx1, tym, tz1) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, txm, ty0, tzm, tx1, tym, tz1) {
                         return Some((hit,t));
                     }
                     curr_node = next_node ( curr_node,tx1,  tym,  tz1);
                 },
                 6 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, tym, tz0, tx1, ty1, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, txm, tym, tz0, tx1, ty1, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node ( curr_node,tx1,  ty1,  tzm );
                 },
                 7 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, tym, tzm, tx1, ty1, tz1 ) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,max,child_idx, txm, tym, tzm, tx1, ty1, tz1 ) {
                         return Some((hit,t));
                     }
                     curr_node = 8;
@@ -241,12 +394,14 @@ pub fn ray_octree<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<
         return None;
     }
 }
-pub fn ray_octree_exact<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> Option<(&'a OctreeNode,f32)> {
+
+pub fn ray_octree<'a>(start: Vec3, dir: Vec3, octree: &'a Octree) -> Option<(&'a OctreeNode,f32)> {
     let mut start = start;
 
-    let node = &chunk_data.head;
+    let root_node_idx = 0;
+    let node = &octree.nodes[root_node_idx];
 
-    let node_pos = node.position ;
+    let node_pos = node.position;
 
     let mut mask:u8 = 0;
     if dir.x < 0. {
@@ -261,7 +416,6 @@ pub fn ray_octree_exact<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> O
         start.z = 2. * node_pos.z as f32 + node.size as f32 - start.z;
         mask |= 1;
     }
-    //println!("mask {:03b}",mask);
 
     let tx0 = (node_pos.x as f32 - start.x) / dir.x.abs();
     let ty0 = (node_pos.y as f32 - start.y) / dir.y.abs();
@@ -277,16 +431,22 @@ pub fn ray_octree_exact<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> O
     let intersects: bool = t_min < t_max ;
 
     if !intersects {
-        println!("no intersection");
         return None;
     }
 
-    return proc_subtree(start,dir,mask,node,tx0,ty0,tz0,tx1,ty1,tz1);
+    return proc_subtree(start,dir,mask,octree,root_node_idx as i32,tx0,ty0,tz0,tx1,ty1,tz1);
 
-    fn proc_subtree(start: Vec3, dir: Vec3, mask: u8,node: &OctreeNode,
+    fn proc_subtree(start: Vec3, dir: Vec3, mask: u8,octree: &Octree, node_idx: i32,
                     tx0:f32,ty0:f32,tz0:f32,tx1:f32,ty1:f32,tz1:f32) -> Option<(&OctreeNode,f32)> {
-        if node.children.is_none() {
-            if node.is_full && ( tx1 >= 0. && ty1 >= 0. && tz1 >= 0.) {
+        let t1_is_pos = tx1 >= 0. && ty1 >= 0. && tz1 >= 0. ;
+
+        if !t1_is_pos {
+            return None;
+        }
+
+        let node = &octree.nodes[node_idx as usize];
+        if !node.has_children {
+            if node.is_full && t1_is_pos {
                 if tx0 < 0. && ty0 < 0. && tz0 < 0.{
                     return Some((node,0.));
                 }else {
@@ -304,57 +464,56 @@ pub fn ray_octree_exact<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> O
 
         let mut curr_node = first_node(tx0,ty0,tz0,txm,tym,tzm);
 
-        let children = &node.children.as_ref().unwrap();
+        let children_idx = node.children_idx;
         //println!("hit index {curr_node}");
 
         while curr_node < 8 {
-            let child = &children[curr_node as usize ^ mask as usize];
+            let child_idx = children_idx[curr_node as usize ^ mask as usize];
             match curr_node {
                 0 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, tx0, ty0, tz0, txm, tym, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, tx0, ty0, tz0, txm, tym, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node(curr_node,txm,tym,tzm);
                 },
                 1 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, 
-                                                        tx0,ty0,tzm,txm,tym,tz1) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, tx0,ty0,tzm,txm,tym,tz1) {
                         return Some((hit,t));
                     }
                     curr_node = next_node(curr_node,txm,tym,tz1);
                 },
                 2 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, tx0, tym, tz0, txm, ty1, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, tx0, tym, tz0, txm, ty1, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node(curr_node,txm,ty1,tzm);
                 },
                 3 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, tx0, tym, tzm, txm, ty1, tz1) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, tx0, tym, tzm, txm, ty1, tz1) {
                         return Some((hit,t));
                     }
                     curr_node = next_node (curr_node,txm, ty1, tz1,);
                 },
                 4 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, ty0, tz0, tx1, tym, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, txm, ty0, tz0, tx1, tym, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node (curr_node,tx1,  tym,  tzm);
                 },
                 5 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, ty0, tzm, tx1, tym, tz1) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, txm, ty0, tzm, tx1, tym, tz1) {
                         return Some((hit,t));
                     }
                     curr_node = next_node ( curr_node,tx1,  tym,  tz1);
                 },
                 6 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, tym, tz0, tx1, ty1, tzm) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, txm, tym, tz0, tx1, ty1, tzm) {
                         return Some((hit,t));
                     }
                     curr_node = next_node ( curr_node,tx1,  ty1,  tzm );
                 },
                 7 => {
-                    if let Some((hit,t)) = proc_subtree(start, dir, mask, child, txm, tym, tzm, tx1, ty1, tz1 ) {
+                    if let Some((hit,t)) = proc_subtree(start, dir, mask, octree,child_idx, txm, tym, tzm, tx1, ty1, tz1 ) {
                         return Some((hit,t));
                     }
                     curr_node = 8;
@@ -365,8 +524,6 @@ pub fn ray_octree_exact<'a>(start: Vec3, dir: Vec3, chunk_data: &'a Octree) -> O
         return None;
     }
 }
-
-
 
 use std::f32;
 
