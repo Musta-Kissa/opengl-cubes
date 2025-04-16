@@ -6,7 +6,9 @@ use std::ffi::CString;
 //use gl33::*;
 //use gl33::global_loader::*;
 
+
 use my_math::vec::Vec3;
+
 
 #[derive(Clone,Copy)]
 pub struct ShaderProgram(u32);
@@ -67,11 +69,30 @@ impl Deref for ShaderProgram {
     }
 }
 
+use std::collections::HashSet;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+static mut NOT_FOUND_UNIFORMS: Option<HashSet<String>> = None;
+
+fn get_global_hashset() -> &'static mut HashSet<String> {
+    unsafe {
+        INIT.call_once(|| {
+            NOT_FOUND_UNIFORMS = Some(HashSet::new());
+        });
+        NOT_FOUND_UNIFORMS.as_mut().expect("HashSet not initialized")
+    }
+}
+
 #[allow(non_snake_case,warnings)]
 pub unsafe fn GetUniformLocation(program: u32,name: &str) -> i32 {
     let out = gl::GetUniformLocation(program, CString::new(name).unwrap().as_ptr() as *const _);
     if out == -1 {
-        println!("COULDNT FIND UNIFORM: {}",name) ;
+        let hashset = get_global_hashset();
+        if !hashset.contains(name.into()) {
+            println!("COULDNT FIND UNIFORM: {}",name) ;
+            hashset.insert(name.into());
+        }
     }
     out
 }

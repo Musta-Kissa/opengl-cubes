@@ -13,12 +13,8 @@ use crate::octree::Octree;
 
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
-use crate::octree::DEVIDE_TIME;
-
-
-//const CHUNK_SIZE: usize = 32;
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 1 << 9;
+pub const SIZE: usize = 1 << 8;
 
 pub type ChunkData = [[[i32; SIZE]; SIZE]; SIZE];
 
@@ -51,7 +47,6 @@ pub fn gen_chunk_octree_2d() -> Octree {
     octree.nodes.shrink_to_fit();
     octree.nodes.reserve_exact(1000);
     println!("time (octree): {:?}",start.elapsed());
-    println!("devide (octree:) {:?}",unsafe { std::time::Duration::from_nanos(DEVIDE_TIME as u64) } );
     //panic!();
     return octree;
 }

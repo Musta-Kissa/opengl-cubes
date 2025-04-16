@@ -35,7 +35,7 @@ mod ray;
 pub const HEIGHT: u32 = 896;
 pub const WIDTH: u32 = 1600;
 
-pub const FPS: f64 = 60.;
+pub const FPS: f64 = f64::MAX;
 
 struct AppState {
     window: PWindow,
@@ -77,7 +77,7 @@ fn clear_screen() {
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
     let mut state = AppState::with_window(win);
-    state.camera.pos= vec3!(-10.,-10.,-10.);
+    state.camera.pos= vec3!(-50.,-50.,-50.);
     state.camera.dir = vec3!(1.,1.,1.).norm();
 
     let mut chunk_data = chunk::gen_chunk_data();
@@ -322,13 +322,13 @@ fn main() {
 
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////
-        //thread::sleep(
-                //time::Duration::from_micros(
-                    //(1./FPS * 1e6 as f64).round() as u64
-                //).saturating_sub(
-                    //frame_time.elapsed()
-                //)
-        //);
+        thread::sleep(
+                time::Duration::from_micros(
+                    (1./FPS * 1e6 as f64).round() as u64
+                ).saturating_sub(
+                    frame_time.elapsed()
+                )
+        );
 
         let elapsed = frame_time.elapsed();
         state.d_t = elapsed.as_nanos() as f32 / 1000_000. ; // in millis

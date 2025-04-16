@@ -37,7 +37,6 @@ impl OctreeNode {
         }
     }
 }
-pub static mut DEVIDE_TIME: u128 = 0;
 const ROOT_IDX:usize = 0;
 pub struct Octree {
     pub nodes: Vec<OctreeNode>
@@ -86,7 +85,6 @@ impl Octree {
         
         self.nodes.extend_from_slice(&nodes);
         self.nodes[node_idx as usize].children_idx = [0,1,2,3,4,5,6,7].map(|x| (len + x) as i32);
-        unsafe { DEVIDE_TIME += start.elapsed().as_nanos() };
         return;
     }
 
