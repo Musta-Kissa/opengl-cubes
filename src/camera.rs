@@ -112,8 +112,10 @@ impl Default for Camera {
     fn default() -> Camera {
         Camera {
             up: vec3!(0., 1., 0.),
-            pos: vec3!(1e-5,1e-5,-5. + 1e-5),
-            dir: vec3!(1e-7,1e-7,1.).norm(),
+            //pos: vec3!(1e-5,1e-5,-5. + 1e-5),
+            //dir: vec3!(1e-7,1e-7,1.).norm(),
+            pos:Vec3 { x: 13.870341, y: 12.413917, z: 4.1491528 },
+            dir:Vec3 { x: -0.5975243, y: -0.6896208, z: 0.40913445 },
             speed: 0.035,
             near: 0.1,
             far: 100.,

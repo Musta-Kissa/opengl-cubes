@@ -18,9 +18,9 @@ use crate::octree::DEVIDE_TIME;
 
 //const CHUNK_SIZE: usize = 32;
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 1 << 8;
+pub const SIZE: usize = 1 << 9;
 
-pub type ChunkData = [[[bool; SIZE]; SIZE]; SIZE];
+pub type ChunkData = [[[i32; SIZE]; SIZE]; SIZE];
 
 pub fn gen_chunk_octree_2d() -> Octree {
     let start = Instant::now();
@@ -40,7 +40,7 @@ pub fn gen_chunk_octree_2d() -> Octree {
 
     for x in 0..SIZE as i32{
         for z in 0..SIZE as i32{
-            let max_y = get_height(x,z) * 10. + 20.;
+            let max_y = get_height(x,z) * 10. + 10.;
             let mut y = 0;
             while (y as f32) < max_y {
                 octree.add_block(ivec3!(x,y,z));
@@ -93,6 +93,39 @@ pub fn gen_chunk_octree() -> Octree {
     //}
 }
 
+pub fn gen_chunk_data_2d() -> Box<ChunkData> {
+    let start = Instant::now();
+    let mut noise = FastNoiseLite::new(SEED as i32);
+    noise.set_noise_type(NoiseType::Perlin);
+    noise.set_frequency(0.015);
+
+    let get_height = |x,z| {
+        let n = noise.get_noise_2d(
+            x as f32 ,
+            z as f32 ,
+        );
+        n
+    };
+
+    let mut count = 0;
+    let mut chunk_data: Box<[[[MaybeUninit<i32>; SIZE]; SIZE]; SIZE]> = Box::new([[[MaybeUninit::<i32>::uninit();SIZE];SIZE];SIZE]);
+
+    for x in 0..SIZE as i32{
+        for z in 0..SIZE as i32{
+            let max_y = get_height(x,z) * 10. + 10.;
+            let mut y = 0;
+            while (y as f32) < max_y {
+                chunk_data[x as usize][y as usize][z as usize] = MaybeUninit::new(1);
+                count += 1;
+                y += 1;
+            }
+        }
+    }
+
+    println!("time (array): {:?}",start.elapsed());
+    println!("cubes: {}",count);
+    return unsafe { Box::from_raw(Box::into_raw(chunk_data) as *mut ChunkData) };
+}
 pub fn gen_chunk_data() -> Box<ChunkData> {
     let start = Instant::now();
 
@@ -106,16 +139,16 @@ pub fn gen_chunk_data() -> Box<ChunkData> {
             y as f32 ,
             z as f32 ,
         );
-        return n >= 0.
+        return n >= 0.;
     };
 
     let mut count = 0;
-    let mut chunk_data: Box<[[[MaybeUninit<bool>; SIZE]; SIZE]; SIZE]> = Box::new([[[MaybeUninit::<bool>::uninit();SIZE];SIZE];SIZE]);
+    let mut chunk_data: Box<[[[MaybeUninit<i32>; SIZE]; SIZE]; SIZE]> = Box::new([[[MaybeUninit::<i32>::uninit();SIZE];SIZE];SIZE]);
     for x in 0..SIZE {
         for y in 0..SIZE {
             for z in 0..SIZE {
                 let voxel = has_voxel(x,y,z);
-                chunk_data[x as usize][y as usize][z as usize] = MaybeUninit::new(voxel);
+                chunk_data[x as usize][y as usize][z as usize] = MaybeUninit::new(voxel as i32);
                 if voxel { count += 1 };
             }
         }
@@ -124,7 +157,7 @@ pub fn gen_chunk_data() -> Box<ChunkData> {
     println!("cubes: {}",count);
     return unsafe { Box::from_raw(Box::into_raw(chunk_data) as *mut ChunkData) };
 }
-
+/*
 pub fn gen_mesh(chunk_data: &Box<ChunkData>) -> Mesh<Vertex> {
     let mut vert_pos: Vec<Vertex> = Vec::new();
 
@@ -196,6 +229,7 @@ pub fn gen_mesh(chunk_data: &Box<ChunkData>) -> Mesh<Vertex> {
 
     Mesh {  indices:gen_indices(vert_pos.len()), verts: vert_pos ,}
 }
+*/
 pub fn gen_indices(len: usize) -> Vec<u32> {
     let mut indices: Vec<u32> = Vec::new();
     indices.reserve_exact(len / 4 * 6);

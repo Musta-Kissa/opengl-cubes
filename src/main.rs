@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+//#![allow(dead_code)]
+//#![allow(unused_parens)]
+//#![allow(unused_variables)]
+//
 //#![allow(warnings)]
 
 mod chunk;
@@ -74,32 +77,33 @@ fn clear_screen() {
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
     let mut state = AppState::with_window(win);
+    state.camera.pos= vec3!(-10.,-10.,-10.);
+    state.camera.dir = vec3!(1.,1.,1.).norm();
+
+    let mut chunk_data = chunk::gen_chunk_data();
     
-    let mut octree = chunk::gen_chunk_octree_2d();
+    let mut octree = chunk::gen_chunk_octree();
     //let mut octree = octree::Octree::new(1 << 2,ivec3!(0,0,0));
-
-    let mut octree_mesh = octree.gen_mesh();
-    let mut octree_skeleton_mesh = octree.gen_skeleton_mesh();
-
-
-    let mut octree_vao = unsafe { utils::vao_from_mesh(&octree_mesh) };
-    let mut octree_skeleton_vao = unsafe { utils::vao_from_mesh(&octree_skeleton_mesh) };
+    //octree.remove_block(ivec3!(0,0,0));
 
     // Load shaders
-    let (compute_program,uv_passthrough_program) = unsafe {
+    let (compute_program,uv_passthrough_program,dda_program) = unsafe {
         use crate::shader::*;
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         let compute_shader              = compile_shader(gl::COMPUTE_SHADER,"./shaders/octree_ray.comp");
+        let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
 
         let uv_passthrough_program      = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
         let compute_program             = ShaderProgram::create_compute(compute_shader);
+        let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
 
         gl::DeleteShader(uv_passthrough_vert);
         gl::DeleteShader(texturig_frag);
         gl::DeleteShader(compute_shader);
-        (compute_program,uv_passthrough_program)
+        (compute_program,uv_passthrough_program,dda_program)
     };
+    //panic!("{}GOOD PANIC{}",GREEN,RESET_COL);
 
     let mut screen_mesh = Mesh::new();
     screen_mesh.verts = vec![
@@ -125,12 +129,22 @@ fn main() {
         use std::mem;
         use crate::octree::OctreeNode;
 
+        //gl::GenBuffers(1, &mut ssbo);
+        //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
+        //gl::BufferData(
+            //gl::SHADER_STORAGE_BUFFER,
+            //(octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
+            //octree.nodes.as_ptr() as *const _,
+            //gl::DYNAMIC_DRAW,
+        //);
+        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
+        
         gl::GenBuffers(1, &mut ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
         gl::BufferData(
             gl::SHADER_STORAGE_BUFFER,
-            (octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
-            octree.nodes.as_ptr() as *const _,
+            (mem::size_of::<chunk::ChunkData>()) as isize,
+            chunk_data.as_ptr() as *const _,
             gl::DYNAMIC_DRAW,
         );
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
@@ -165,20 +179,25 @@ fn main() {
             state.window.set_cursor_pos((WIDTH /2 ) as f64, (HEIGHT /2 ) as f64);
         }
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
         let camera = &state.camera;
-        // RENDER 
+        // RENDER /////////////////////////////////////////////////////////////////////////////////////////////////////////
+
         let start_compute = Instant::now();
+
         unsafe {
 
             gl::Clear(0);
-            gl::UseProgram(*compute_program);
-            compute_program.set_float("fov",camera.fov);
-            compute_program.set_vec3("camera_pos",camera.pos);
-            compute_program.set_vec3("camera_dir",camera.dir);
+            //gl::UseProgram(*compute_program);
+            //compute_program.set_float("fov",camera.fov);
+            //compute_program.set_vec3("camera_pos",camera.pos);
+            //compute_program.set_vec3("camera_dir",camera.dir);
+            
+            gl::UseProgram(*dda_program);
+            dda_program.set_float("fov",camera.fov);
+            dda_program.set_int("SIZE",chunk::SIZE as i32);
+            dda_program.set_vec3("camera_pos",camera.pos);
+            dda_program.set_vec3("camera_dir",camera.dir);
+            dda_program.set_vec3("light_dir",state.light_dir);
 
             gl::DispatchCompute((WIDTH /16), 
                                 (HEIGHT/16), 1);
@@ -315,7 +334,7 @@ fn main() {
         state.d_t = elapsed.as_nanos() as f32 / 1000_000. ; // in millis
         
         let avrg = time_buffer.update(elapsed.as_micros());
-        state.window.set_title(&format!("{:.2}fps ({:?})",1./(avrg / 1000_000.),elapsed));
+        state.window.set_title(&format!("{:.2}fps ({:.4?})",1./(avrg / 1000_000.),elapsed));
     }
 }
 

@@ -655,7 +655,7 @@ pub fn dda_3d(start: Vec3, dir: Vec3, max_distance: f32,chunk_data:&Box<ChunkDat
         if !(voxel.x < 0 || voxel.x >= SIZE as i32 
             || voxel.y < 0 || voxel.y >= SIZE as i32 
             || voxel.z < 0 || voxel.z >= SIZE as i32) {
-            if chunk_data[voxel.x as usize][voxel.y as usize][voxel.z as usize] {
+            if chunk_data[voxel.x as usize][voxel.y as usize][voxel.z as usize] != 0 {
                 return Some((voxel,start + dir * traveled_distance));
             }
         }

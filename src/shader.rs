@@ -24,7 +24,7 @@ impl ShaderProgram {
         gl::GetProgramiv(program, gl::LINK_STATUS, &mut success );
         if success == 0 {
             gl::GetProgramInfoLog(program, 512, null_mut(), infolog.as_mut_ptr() as *mut _);
-            panic!("shader linking error: {}", str::from_utf8(&infolog).unwrap());
+            panic!("shader linking error:\n{}", str::from_utf8(&infolog).unwrap());
         }
 
         ShaderProgram(program)
@@ -41,7 +41,7 @@ impl ShaderProgram {
         gl::GetProgramiv(program, gl::LINK_STATUS, &mut success );
         if success == 0 {
             gl::GetProgramInfoLog(program, 512, null_mut(), infolog.as_mut_ptr() as *mut i8);
-            panic!("shader linking error: {}", std::str::from_utf8(&infolog).unwrap());
+            panic!("shader linking error:\n{}", std::str::from_utf8(&infolog).unwrap());
         }
 
         ShaderProgram(program)
@@ -51,6 +51,9 @@ impl ShaderProgram {
     }
     pub unsafe fn set_float(self,name: &str, val: f32) {
         gl::Uniform1f(GetUniformLocation(self.0,name), val);
+    }
+    pub unsafe fn set_int(self,name: &str, val: i32) {
+        gl::Uniform1i(GetUniformLocation(self.0,name), val);
     }
     pub unsafe fn set_mat4(self,name: &str, ptr: *const f32) {
         gl::UniformMatrix4fv(GetUniformLocation(self.0,name), 1, 0, ptr);
@@ -98,7 +101,7 @@ pub unsafe fn compile_shader(shader_type: u32, path: &str) -> u32 {
             gl::FRAGMENT_SHADER =>   "fragment ",
             _ =>                    "",
         };
-        panic!("{shader_type}shader compilation error: {}", str::from_utf8(&infolog).unwrap());
+        panic!("{shader_type}shader compilation error:\n{}", str::from_utf8(&infolog).unwrap());
     }
 
     shader

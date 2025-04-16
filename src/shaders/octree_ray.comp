@@ -88,7 +88,7 @@ void main() {
     imageStore(screen, pixel_coords, vec4(pixel,1.0));
 }
 
-const uint STACK_SIZE = 23; // 2^10 == 1024 (max tree size)
+const uint STACK_SIZE = 30; // 2^10 == 1024 (max tree size)
 struct StackNode {
     int node_idx;
     float tx0;

@@ -1,0 +1,236 @@
+#version 430
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout (binding = 0, rgba32f) uniform image2D screen;
+
+uniform vec3 camera_pos;
+uniform vec3 camera_dir;
+uniform vec3 light_dir;
+uniform float fov;
+uniform int SIZE;
+
+struct IVec3 {
+    int x;
+    int y;
+    int z;
+};
+
+struct RayHit {
+    //OctreeNode node;
+    // if t == -1 no hit
+    ivec3 voxel;
+    float dist;
+};
+
+//const int SIZE = 128;
+const vec3 POS = vec3(0,0,0);
+
+layout(std430, binding = 0) buffer OctreeBuffer {
+    bool data[];
+};
+bool getData(ivec3 voxel) {
+    if (voxel.x < 0 || voxel.x >= SIZE ||
+        voxel.y < 0 || voxel.y >= SIZE ||
+        voxel.z < 0 || voxel.z >= SIZE )
+    {
+        return false;
+    } else {
+        return data[voxel.x + voxel.y * SIZE + voxel.z * SIZE*SIZE];
+    }
+}
+
+layout(std430, binding = 1) buffer DebugBuffer {
+    float debugNums[];
+};
+
+RayHit dda_3d(vec3 start, vec3 dir, float max_distance);
+vec3 hit_direction(vec3 hit, vec3 dir);
+bool ray_aabb_cube(vec3 start, vec3 dir, vec3 min_pos, vec3 max_pos);
+
+
+void main() {
+    // Get the coordinates of the pixel to write
+    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+
+    vec2 res = vec2(imageSize(screen));
+
+	vec2 ndc = (vec2(pixel_coords) * 2 - res) / res;
+    ndc.x *= res.x / res.y;
+
+    //float fov = 62.0;
+
+    vec3 forward = camera_dir;
+    vec3 left   = normalize(cross(forward, vec3(0.,1.,0.)));
+    vec3 up     = cross(left,forward);
+
+    float scale = tan(radians(fov * 0.5));
+    vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
+
+    vec3  pixel = vec3(0.2, 0.3, 0.3);
+
+    RayHit ray_hit = dda_3d(camera_pos,ray_dir,1000.);
+    if (ray_hit.dist > 0.) {
+        vec3 hit = camera_pos + ray_dir * ray_hit.dist;
+        pixel = vec3(1,0,0);
+
+        vec3 hit_dir = hit_direction(hit,ray_dir);
+
+        float ambient = 0.05;
+        float dot_light = dot(light_dir,hit_dir);
+        float ratio = (dot_light + 1.0) / 2.0;
+        pixel = (vec3(0,0,1) * ratio) + ambient;
+    }
+    // exided numer of steps
+    if (ray_hit.dist == -1) {
+        pixel = vec3(1,0,0);
+    }
+    // aabb not hit
+    if (ray_hit.dist == -2) {
+        pixel = vec3(0,1,0);
+    }
+
+
+    imageStore(screen, pixel_coords, vec4(pixel,1.0));
+}
+
+float frac0(float x) {
+    return x - floor(x);
+}
+float frac1(float x) {
+    return 1.0 - x + floor(x);
+}
+
+RayHit dda_3d(vec3 start, vec3 dir, float max_distance){
+    ivec3 voxel     = ivec3(floor(start));
+    ivec3 step_dir  = ivec3(sign(dir));
+    vec3 t_delta    = 1. / abs(dir);
+
+
+    if (!ray_aabb_cube(start,dir,POS,POS+SIZE)) {
+        RayHit hit_out;
+        hit_out.dist = -2.;
+        return hit_out;
+    }
+
+
+    float t_max_x;
+    if (dir.x > 0.) {
+        t_max_x = t_delta.x * frac1(start.x);
+    } else {
+        t_max_x = t_delta.x * frac0(start.x);
+    };
+    float t_max_y;
+    if (dir.y > 0.) {
+        t_max_y = t_delta.y * frac1(start.y);
+    } else {
+        t_max_y = t_delta.y * frac0(start.y);
+    };
+    float t_max_z;
+    if (dir.z > 0.) {
+        t_max_z = t_delta.z * frac1(start.z);
+    } else {
+        t_max_z = t_delta.z * frac0(start.z);
+    };
+
+
+    float traveled_distance = 0.0;
+    while (traveled_distance < max_distance) {
+        if (getData(voxel)) {
+            //return Some((voxel,start + dir * traveled_distance));
+            return RayHit(voxel,traveled_distance);
+        }
+        //if (voxel == ivec3(0,0,0)) {
+            //return RayHit(voxel,traveled_distance);
+        //}
+
+        // Possibly faster using
+        //let should_increment_x = (t_max_x <= t_max_y && t_max_x <= t_max_z) as i32;
+        //let should_increment_y = (t_max_y <= t_max_x && t_max_y <= t_max_z) as i32;
+        //let should_increment_z = (t_max_z <= t_max_x && t_max_z <= t_max_y) as i32;
+
+        if (t_max_x < t_max_y) {
+            if (t_max_x < t_max_z) {
+                voxel.x += step_dir.x;
+                traveled_distance = t_max_x;
+                t_max_x += t_delta.x;
+            } else {
+                voxel.z += step_dir.z;
+                traveled_distance = t_max_z;
+                t_max_z += t_delta.z;
+            }
+        } else {
+            if (t_max_y < t_max_z) {
+                voxel.y += step_dir.y;
+                traveled_distance = t_max_y;
+                t_max_y += t_delta.y;
+            } else {
+                voxel.z += step_dir.z;
+                traveled_distance = t_max_z;
+                t_max_z += t_delta.z;
+            }
+        }
+    }
+    RayHit hit;
+    hit.dist = -1.;
+    return hit;
+}
+
+bool ray_aabb_cube(vec3 start, vec3 dir, vec3 min_pos, vec3 max_pos) {
+    // Calculate the inverse of the direction
+    vec3 invDir = 1.0 / dir;
+
+    // Initialize t_min and t_max
+    vec3 tMin = (min_pos - start) * invDir;
+    vec3 tMax = (max_pos - start) * invDir;
+
+    // Reorder t_min and t_max for each axis
+    if (invDir.x < 0.0) {
+        float temp = tMin.x;
+        tMin.x = tMax.x;
+        tMax.x = temp;
+    }
+    if (invDir.y < 0.0) {
+        float temp = tMin.y;
+        tMin.y = tMax.y;
+        tMax.y = temp;
+    }
+    if (invDir.z < 0.0) {
+        float temp = tMin.z;
+        tMin.z = tMax.z;
+        tMax.z = temp;
+    }
+
+    // Calculate t_enter and t_exit
+    float tEnter = max(max(tMin.x, tMin.y), tMin.z);
+    float tExit = min(min(tMax.x, tMax.y), tMax.z);
+
+    // Check for intersection
+    return (tEnter <= tExit && tExit >= 0.0);
+}
+
+vec3 hit_direction(vec3 hit, vec3 dir) {
+    float x = abs(hit.x - round(hit.x));
+    float y = abs(hit.y - round(hit.y));
+    float z = abs(hit.z - round(hit.z));
+
+    if (x < y && x < z) {
+        if (dir.x < 0.) {
+            return vec3(-1,0,0);
+        } else {
+            return vec3(1,0,0);
+        }
+    } else if (y < z) {
+        if (dir.y < 0.) {
+            return vec3(0,-1,0);
+        } else {
+            return vec3(0,1,0);
+        }
+    } else {
+        if (dir.z < 0.) {
+            return vec3(0,0,-1);
+        } else {
+            return vec3(0,0,1);
+        }
+    }
+}
