@@ -76,7 +76,7 @@ fn clear_screen() {
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
     let mut state = AppState::with_window(win);
-    state.camera.pos= vec3!(-50.,50.,-50.);
+    state.camera.pos= vec3!(chunk::SIZE as f32 * -1.,chunk::SIZE  as f32* 2.,chunk::SIZE as f32 * -1.);
     state.camera.dir = vec3!(1.,-1.,1.).norm();
 
 

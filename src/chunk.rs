@@ -9,7 +9,7 @@ use crate::octree::Octree;
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 1 << 8;
+pub const SIZE: usize = 1 << 7;
 pub const BRICK_GRID_SIZE:usize = SIZE / 8;
 
 #[repr(C)]
