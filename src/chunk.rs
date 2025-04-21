@@ -1,12 +1,7 @@
-use crate::mesh::Mesh;
-use crate::vertex::Vertex;
-
 use my_math::vec::*;
 
 use std::mem::MaybeUninit;
 use std::time::Instant;
-
-use crate::utils::DIRECTIONS;
 
 use crate::octree::Octree;
 //use crate::octree::Octree;
@@ -15,6 +10,75 @@ use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
 pub const SEED: u64 = 1111;
 pub const SIZE: usize = 1 << 8;
+pub const BRICK_GRID_SIZE:usize = SIZE / 8;
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct Voxel {
+    pub data: u32,
+}
+pub type Brick = [[[Voxel;8];8];8];
+pub type BrickGrid = Box<[[[u32; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]>;
+#[repr(C)]
+pub struct BrickMap {
+    pub brick_grid: BrickGrid,
+    pub brick_data: Vec<Brick>,
+}
+impl BrickMap {
+    pub fn new() -> Self {
+        Self {
+            brick_grid: Box::new([[[u32::MAX;BRICK_GRID_SIZE];BRICK_GRID_SIZE];BRICK_GRID_SIZE]),
+            brick_data: Vec::new(),
+        }
+    }
+    pub fn add_voxel(&mut self, pos: IVec3, voxel: Voxel) {
+        let grid_coords :IVec3 = pos.div_floor(8);
+        let brick_coords:IVec3 = pos.modulo(8);
+
+        let brick = &mut self.brick_grid[grid_coords.x as usize][grid_coords.y as usize][grid_coords.z as usize];
+
+        if *brick == u32::MAX {
+            *brick = self.brick_data.len() as u32;
+            let mut out = [[[ Voxel{ data: 0 } ;8];8];8];
+            out[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
+            self.brick_data.push(out);
+        } else {
+            let data = &mut self.brick_data[*brick as usize];
+            data[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
+        }
+    }
+}
+
+
+pub fn gen_brickmap() -> BrickMap {
+    let start = Instant::now();
+    let mut brick_map = BrickMap::new();
+
+    let mut noise = FastNoiseLite::new(SEED as i32);
+    noise.set_noise_type(NoiseType::Perlin);
+    noise.set_frequency(0.035);
+
+    let has_voxel = |x,y,z| {
+        let n = noise.get_noise_3d(
+            x as f32 ,
+            y as f32 ,
+            z as f32 ,
+        );
+        return n >= 0.
+    };
+
+    for x in 0..SIZE as i32{
+        for y in 0..SIZE as i32{
+            for z in 0..SIZE as i32{
+                if has_voxel(x,y,z) {
+                    brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1});
+                }
+            }
+        }
+    }
+    println!("time (brick map): {:?}",start.elapsed());
+    brick_map
+}
 
 pub type ChunkData = [[[i32; SIZE]; SIZE]; SIZE];
 

@@ -1,4 +1,4 @@
-use glfw::{fail_on_errors,SwapInterval,Action, Context, Glfw, Key, PRenderContext, PWindow};
+use glfw::{fail_on_errors,SwapInterval,Action, Context, Glfw, Key, PWindow};
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -15,6 +15,16 @@ use crate::mesh::*;
 
 use my_math::prelude::*;
 use gl::types::GLenum;
+
+pub mod colors {
+    //for i in 0..100 {
+        //println!("\x1b[{i}m{i}\x1b[0m");
+    //}
+    pub const RED:&str = "\x1b[91m";
+    pub const MAGENTA:&str = "\x1b[35m";
+    pub const GREEN:&str = "\x1b[32m";
+    pub const RESET_COL:&str = "\x1b[0m";
+}
 
 pub fn create_texture(width: u32, height: u32) -> u32 {
     let mut texture: u32 = 0;

@@ -57,6 +57,9 @@ impl ShaderProgram {
     pub unsafe fn set_int(self,name: &str, val: i32) {
         gl::Uniform1i(GetUniformLocation(self.0,name), val);
     }
+    pub unsafe fn set_uint(self,name: &str, val: u32) {
+        gl::Uniform1ui(GetUniformLocation(self.0,name), val);
+    }
     pub unsafe fn set_mat4(self,name: &str, ptr: *const f32) {
         gl::UniformMatrix4fv(GetUniformLocation(self.0,name), 1, 0, ptr);
     }
@@ -88,9 +91,10 @@ fn get_global_hashset() -> &'static mut HashSet<String> {
 pub unsafe fn GetUniformLocation(program: u32,name: &str) -> i32 {
     let out = gl::GetUniformLocation(program, CString::new(name).unwrap().as_ptr() as *const _);
     if out == -1 {
+        use crate::utils::colors::*;
         let hashset = get_global_hashset();
         if !hashset.contains(name.into()) {
-            println!("COULDNT FIND UNIFORM: {}",name) ;
+            println!("{RED}COULDNT FIND UNIFORM: \"{name}\"{RESET_COL}") ;
             hashset.insert(name.into());
         }
     }

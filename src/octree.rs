@@ -79,10 +79,8 @@ impl Octree {
                 OctreeNode::new(half_size as u32, ivec3!(pos.x + half_size, pos.y + half_size, pos.z            ),full),
                 OctreeNode::new(half_size as u32, ivec3!(pos.x + half_size, pos.y + half_size, pos.z + half_size),full),
         ];
-        let start = std::time::Instant::now();
 
         // TODO remove orphan nodes
-        
         self.nodes.extend_from_slice(&nodes);
         self.nodes[node_idx as usize].children_idx = [0,1,2,3,4,5,6,7].map(|x| (len + x) as i32);
         return;
@@ -198,7 +196,7 @@ impl Octree {
         }
     }
     pub fn is_solid_at(&self,pos:IVec3) -> bool {
-        let mut head = &self.nodes[ROOT_IDX];
+        let head = &self.nodes[ROOT_IDX];
         if !inside_bouds(head,pos) {
             return false;
         }
@@ -211,7 +209,6 @@ impl Octree {
                 return false;
             }
 
-            let children_idx = &curr.children_idx;
             let child_idx = pos_to_idx(curr,pos);
             curr = &self.nodes[child_idx as usize];
         }

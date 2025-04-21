@@ -29,9 +29,10 @@ struct RayHit {
 const vec3 POS = vec3(0,0,0);
 const float MAX_DIST = 1500.;
 
-layout(std430, binding = 0) buffer OctreeBuffer {
+layout(std430, binding = 0) buffer ChunkDataBuffer {
     bool data[];
 };
+
 bool getData(ivec3 voxel) {
     if (voxel.x < 0 || voxel.x >= SIZE ||
         voxel.y < 0 || voxel.y >= SIZE ||
@@ -39,18 +40,91 @@ bool getData(ivec3 voxel) {
     {
         return false;
     } else {
-        return data[voxel.x + voxel.y * SIZE + voxel.z * SIZE*SIZE];
+        return data[voxel.x *SIZE*SIZE + voxel.y * SIZE + voxel.z ];
     }
 }
+
+struct Voxel {
+    int data;
+};
+
+struct Brick {
+    Voxel data[8][8][8];
+};
 
 layout(std430, binding = 1) buffer DebugBuffer {
     float debugNums[];
 };
 
+layout(std430, binding = 2) buffer BrickGridBuffer {
+    uint brickGrid[];
+};
+layout(std430, binding = 3) buffer BrickDataBuffer {
+    Brick brickData[];
+};
+
+uint index_brick_grid(ivec3 voxel) {
+    if (voxel.x < 0 || voxel.x >= SIZE/8 ||
+        voxel.y < 0 || voxel.y >= SIZE/8 ||
+        voxel.z < 0 || voxel.z >= SIZE/8 )
+    {
+        return 696969; 
+    } else {
+        return brickGrid[voxel.x *SIZE/8*SIZE/8 + voxel.y * SIZE/8 + voxel.z ];
+    }
+}
+
+//bool getVoxel(ivec3 pos) {
+    //if (pos.x < 0 || pos.x >= SIZE ||
+        //pos.y < 0 || pos.y >= SIZE ||
+        //pos.z < 0 || pos.z >= SIZE )
+    //{
+        //return false; 
+    //} 
+    //ivec3 grid_coords = pos / 8;
+    //ivec3 brick_coords = pos % 8;
+//
+    //uint brick_index = brickGrid[pos.x *SIZE/8*SIZE/8 + pos.y * SIZE/8 + pos.z ];
+//
+    //Brick brick = brickData[brick_index];
+//
+    //Voxel voxel = brick.data[brick_coords.x][brick_coords.y][brick_coords.z];
+//
+    //return bool(voxel.data);
+//}
+
+const int SIZE_8 = SIZE/8;
+const int SIZE2_64 = SIZE*SIZE/64;
+
+bool getVoxel(ivec3 pos) {
+    if (pos.x < 0 || pos.x >= SIZE ||
+        pos.y < 0 || pos.y >= SIZE ||
+        pos.z < 0 || pos.z >= SIZE )
+    {
+        return false; 
+    } 
+    //ivec3 grid_coords = pos / 8;
+    //ivec3 brick_coords = pos % 8;
+    //Brick brick = brickData[brickGrid[grid_coords.x * SIZE2_64 + grid_coords.y * SIZE_8 + grid_coords.z ]];
+    //Voxel voxel = brick.data[brick_coords.x][brick_coords.y][brick_coords.z];
+
+    Brick brick = brickData[0];
+    Voxel voxel = brick.data[pos.x][pos.y][pos.z];
+
+
+    return bool(voxel.data);
+}
+
 RayHit dda_3d(vec3 start, vec3 dir, float max_distance);
 float ray_aabb_cube(vec3 start, vec3 dir, vec3 min_pos, vec3 max_pos);
 
+uniform uint test_uint;
+
 void main() {
+    //debugNums[0] = float(brickGrid[1]);
+    ivec3 voxel = ivec3(19,19,19);
+    debugNums[0] = float(index_brick_grid(voxel));
+
     // Get the coordinates of the pixel to write
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
 
@@ -86,22 +160,24 @@ void main() {
     // exeeded the numer of steps
     if (ray_hit.dist == -1) {
         //pixel = vec3(1,0,0);
-        pixel = vec3(float(ray_hit.steps)/300.,0,0);
+        //pixel = vec3(float(ray_hit.steps)/300.,0,0);
         //pixel = vec3((100-float(ray_hit.steps))/100.,0,float(ray_hit.steps)/300.);
     } else {
-        pixel = vec3(0,0,float(ray_hit.steps)/300.);
+        //pixel = vec3(0,0,float(ray_hit.steps)/300.);
     }
 
 
     // aabb not hit
     if (ray_hit.dist == -2) {
         //pixel = vec3(0,1,0);
-        pixel = vec3(0.2, 0.3, 0.3);
+        //pixel = vec3(0.2, 0.3, 0.3);
     }
 
 
     imageStore(screen, pixel_coords, vec4(pixel,1.0));
 }
+
+
 
 float frac0(float x) {
     return x - floor(x);
