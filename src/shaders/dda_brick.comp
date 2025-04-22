@@ -77,6 +77,9 @@ void main() {
         float ratio = (dot_light + 1.0) / 2.0;
         pixel = (vec3(0,0,1) * ratio) + ambient;
     }
+    if ( ray_hit.dist != -2 ) {
+    pixel = vec3(float(ray_hit.steps)/100.,0,0);
+    }
 
     imageStore(screen, pixel_coords, vec4(pixel,1.0));
 }

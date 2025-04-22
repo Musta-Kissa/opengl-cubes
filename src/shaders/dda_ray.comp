@@ -109,9 +109,6 @@ void main() {
     pixel = vec3(float(ray_hit.steps)/100.,0,0);
     }
 
-    //if (all(greaterThan(ray_hit.
-
-
     /*
     // exeeded the numer of steps
     if (ray_hit.dist == -1) {
