@@ -244,10 +244,16 @@ impl TimeBuffer {
 }
 
 static mut SEED: u32 = 123456789; // Change this seed as needed
-pub fn simple_rng() -> f32 {
+pub fn simple_rng_f32() -> f32 {
     unsafe {
         SEED = SEED.wrapping_mul(1664525).wrapping_add(1013904223); // LCG formula
         (SEED >> 8) as f32 / (1u32 << 24) as f32 // Scale to [0,1)
+    }
+}
+pub fn simple_rng_u32() -> u32 {
+    unsafe {
+        SEED = SEED.wrapping_mul(1664525).wrapping_add(1013904223); // LCG formula
+        SEED
     }
 }
 //pub fn calculate_normals(p1:Vec3,p2:Vec3,p3:Vec3) -> Vec3 {

@@ -2,6 +2,7 @@ use my_math::vec::*;
 
 use std::mem::MaybeUninit;
 use std::time::Instant;
+use crate::utils;
 
 use crate::octree::Octree;
 //use crate::octree::Octree;
@@ -17,34 +18,35 @@ pub const BRICK_GRID_SIZE:usize = SIZE / BRICK_SIZE;
 #[derive(Clone,Copy)]
 pub struct Voxel {
     pub data: u32,
+    pub color: u32,
 }
 pub type Brick = [[[Voxel;8];8];8];
 pub type BrickGrid = Box<[[[u32; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]>;
 #[repr(C)]
 pub struct BrickMap {
-    pub brick_grid: BrickGrid,
-    pub brick_data: Vec<Brick>,
+    pub grid: BrickGrid,
+    pub data: Vec<Brick>,
 }
 impl BrickMap {
     pub fn new() -> Self {
         Self {
-            brick_grid: Box::new([[[u32::MAX;BRICK_GRID_SIZE];BRICK_GRID_SIZE];BRICK_GRID_SIZE]),
-            brick_data: Vec::new(),
+            grid: Box::new([[[u32::MAX;BRICK_GRID_SIZE];BRICK_GRID_SIZE];BRICK_GRID_SIZE]),
+            data: Vec::new(),
         }
     }
     pub fn add_voxel(&mut self, pos: IVec3, voxel: Voxel) {
         let grid_coords :IVec3 = pos.div_floor(8);
         let brick_coords:IVec3 = pos.modulo(8);
 
-        let brick = &mut self.brick_grid[grid_coords.x as usize][grid_coords.y as usize][grid_coords.z as usize];
+        let brick = &mut self.grid[grid_coords.x as usize][grid_coords.y as usize][grid_coords.z as usize];
 
         if *brick == u32::MAX {
-            *brick = self.brick_data.len() as u32;
-            let mut out = [[[ Voxel{ data: 0 } ;8];8];8];
+            *brick = self.data.len() as u32;
+            let mut out = [[[ Voxel{ data: 0 , color: utils::simple_rng_u32()} ;8];8];8];
             out[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
-            self.brick_data.push(out);
+            self.data.push(out);
         } else {
-            let data = &mut self.brick_data[*brick as usize];
+            let data = &mut self.data[*brick as usize];
             data[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
         }
     }
@@ -71,7 +73,7 @@ pub fn gen_brickmap_2d() -> BrickMap {
             let max_y = get_height(x,z) * 10. + 10.;
             let mut y = 0;
             while (y as f32) < max_y {
-                brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1});
+                brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1, color: utils::simple_rng_u32()});
                 y += 1;
             }
         }
@@ -102,7 +104,7 @@ pub fn gen_brickmap() -> BrickMap {
         for y in 0..SIZE as i32{
             for z in 0..SIZE as i32{
                 if has_voxel(x,y,z) {
-                    brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1});
+                    brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1, color: utils::simple_rng_u32()});
                 }
             }
         }

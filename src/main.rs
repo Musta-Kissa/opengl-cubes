@@ -11,7 +11,6 @@ mod utils;
 mod shader;
 mod camera;
 mod octree;
-//mod ray;
 
 #[macro_use]
 extern crate my_math;
@@ -26,7 +25,7 @@ use crate::mesh::Mesh;
 
 use camera::Camera;
 
-pub const HEIGHT: u32 = 730;
+pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = f64::MAX;
@@ -75,17 +74,10 @@ fn main() {
                             chunk::SIZE as f32 * -1.);
     state.camera.dir = vec3!(1.,-1.,1.).norm();
 
-
-    #[allow(unused_mut)]
-    let mut chunk_data = chunk::gen_chunk_data_2d();
-
     let mut chunk_brickmap = chunk::gen_brickmap_2d();
+    println!("{}",chunk_brickmap.data.len());
     let mut brick_grid_ssbo = 0;
     let mut brick_data_ssbo = 0;
-
-    //let mut octree = chunk::gen_chunk_octree();
-    //let mut octree = octree::Octree::new(1 << 2,ivec3!(0,0,0));
-    //octree.remove_block(ivec3!(0,0,0));
 
     // Load shaders
     let (screen_texturing_program,dda_program) = unsafe {
@@ -103,7 +95,6 @@ fn main() {
         gl::DeleteShader(dda_compute_shader);
         (screen_texturing_program,dda_program)
     };
-    //panic!("{}GOOD PANIC{}",GREEN,RESET_COL);
 
     let mut screen_mesh = Mesh::new();
     screen_mesh.verts = vec![
@@ -147,17 +138,19 @@ fn main() {
         gl::BufferData(
             gl::SHADER_STORAGE_BUFFER,
             (mem::size_of::<[[[u32; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]>()) as isize,
-            chunk_brickmap.brick_grid.as_ptr() as *const _,
+            chunk_brickmap.grid.as_ptr() as *const _,
             gl::DYNAMIC_DRAW,
         );
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, brick_grid_ssbo);
+        /////////////////////////////////////////////////////////////////////
 
+        println!("size {}",(mem::size_of::<chunk::Brick>()) as isize * chunk_brickmap.data.len() as isize);
         gl::GenBuffers(1, &mut brick_data_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_data_ssbo);
         gl::BufferData(
             gl::SHADER_STORAGE_BUFFER,
-            (mem::size_of::<chunk::Brick>()) as isize * chunk_brickmap.brick_data.len() as isize,
-            chunk_brickmap.brick_data.as_ptr() as *const _,
+            (mem::size_of::<chunk::Brick>()) as isize * chunk_brickmap.data.len() as isize,
+            chunk_brickmap.data.as_ptr() as *const _,
             gl::DYNAMIC_DRAW,
         );
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, brick_data_ssbo);
@@ -208,8 +201,8 @@ fn main() {
                 //(debug_data.len() * std::mem::size_of::<i32>()) as _,
                 //debug_data.as_mut_ptr() as *mut _,
             //);
-            //println!("data len: {}",chunk_brickmap.brick_data.len());
-            //println!("og     0: {}",chunk_brickmap.brick_grid[0][0][0]);
+            //println!("data len: {}",chunk_brickmap.data.len());
+            //println!("og     0: {}",chunk_brickmap.grid[0][0][0]);
             //println!("{}debug 0: {}{}",MAGENTA,debug_data[0],RESET_COL);
         }
 

@@ -5,12 +5,6 @@ layout (binding = 0, rgba32f) uniform image2D screen;
 
 #define BRICK_SIZE 8
 
-struct IVec3 {
-    int x;
-    int y;
-    int z;
-};
-
 struct RayHit {
     ivec3 voxel_pos;
     ivec3 dir;
@@ -18,10 +12,12 @@ struct RayHit {
     // -2 aabb collition check
     float dist;
     int steps;
+    uint color;
 };
 
 struct Voxel {
     int data;
+    uint color;
 };
 struct Brick {
     Voxel data[BRICK_SIZE][BRICK_SIZE][BRICK_SIZE];
@@ -75,11 +71,12 @@ void main() {
         float ambient = 0.05;
         float dot_light = dot(light_dir,hit_dir);
         float ratio = (dot_light + 1.0) / 2.0;
-        pixel = (vec3(0,0,1) * ratio) + ambient;
+        vec3 color = normalize(vec3(ray_hit.color << 24 >> 24,ray_hit.color << 16 >> 24,ray_hit.color << 8 >> 24));
+        pixel = (color * ratio) + ambient;
     }
-    if ( ray_hit.dist != -2 ) {
-    pixel = vec3(float(ray_hit.steps)/100.,0,0);
-    }
+    //if ( ray_hit.dist != -2 ) {
+    //pixel = vec3(float(ray_hit.steps)/100.,0,0);
+    //}
 
     imageStore(screen, pixel_coords, vec4(pixel,1.0));
 }
@@ -124,7 +121,7 @@ RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
            all(greaterThanEqual (brick_pos,ivec3(0)) ) ){
         if (brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
             ivec3 hit_dir = ivec3(mask*step_dir);
-            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps);
+            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps,brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
         }
 
         mask       = step_mask(axis_dist);
