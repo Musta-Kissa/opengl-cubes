@@ -10,7 +10,8 @@ use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
 pub const SEED: u64 = 1111;
 pub const SIZE: usize = 1 << 7;
-pub const BRICK_GRID_SIZE:usize = SIZE / 8;
+pub const BRICK_SIZE: usize = 8;
+pub const BRICK_GRID_SIZE:usize = SIZE / BRICK_SIZE;
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -49,6 +50,36 @@ impl BrickMap {
     }
 }
 
+pub fn gen_brickmap_2d() -> BrickMap {
+    let start = Instant::now();
+    let mut brick_map = BrickMap::new();
+
+    let mut noise = FastNoiseLite::new(SEED as i32);
+    noise.set_noise_type(NoiseType::Perlin);
+    noise.set_frequency(0.015);
+
+    let get_height = |x,z| {
+        let n = noise.get_noise_2d(
+            x as f32 ,
+            z as f32 ,
+        );
+        n
+    };
+
+    for x in 0..SIZE as i32{
+        for z in 0..SIZE as i32{
+            let max_y = get_height(x,z) * 10. + 10.;
+            let mut y = 0;
+            while (y as f32) < max_y {
+                brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1});
+                y += 1;
+            }
+        }
+    }
+
+    println!("time (brick map): {:?}",start.elapsed());
+    brick_map
+}
 
 pub fn gen_brickmap() -> BrickMap {
     let start = Instant::now();

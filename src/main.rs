@@ -11,13 +11,11 @@ mod utils;
 mod shader;
 mod camera;
 mod octree;
+//mod ray;
 
 #[macro_use]
 extern crate my_math;
 use my_math::prelude::*;
-
-//use gl33::*;
-//use gl33::global_loader::*;
 
 use glfw::{Context, Key, PWindow};
 use std::{time,thread};
@@ -26,14 +24,10 @@ use crate::utils::*;
 use crate::vertex::*;
 use crate::mesh::Mesh;
 
-//use gl::*;
-
 use camera::Camera;
 
-mod ray;
-
-pub const HEIGHT: u32 = 896;
-pub const WIDTH: u32 = 1600;
+pub const HEIGHT: u32 = 730;
+pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = f64::MAX;
 
@@ -76,36 +70,38 @@ fn clear_screen() {
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
     let mut state = AppState::with_window(win);
-    state.camera.pos= vec3!(chunk::SIZE as f32 * -1.,chunk::SIZE  as f32* 2.,chunk::SIZE as f32 * -1.);
+    state.camera.pos= vec3!(chunk::SIZE as f32 * -1.,
+                            chunk::SIZE as f32 *  2.,
+                            chunk::SIZE as f32 * -1.);
     state.camera.dir = vec3!(1.,-1.,1.).norm();
 
 
     #[allow(unused_mut)]
-    let mut chunk_data = chunk::gen_chunk_data();
+    let mut chunk_data = chunk::gen_chunk_data_2d();
 
-
-    let mut chunk_brickmap = chunk::gen_brickmap();
+    let mut chunk_brickmap = chunk::gen_brickmap_2d();
     let mut brick_grid_ssbo = 0;
     let mut brick_data_ssbo = 0;
 
-    let mut octree = chunk::gen_chunk_octree();
+    //let mut octree = chunk::gen_chunk_octree();
     //let mut octree = octree::Octree::new(1 << 2,ivec3!(0,0,0));
     //octree.remove_block(ivec3!(0,0,0));
 
     // Load shaders
-    let (uv_passthrough_program,dda_program) = unsafe {
+    let (screen_texturing_program,dda_program) = unsafe {
         use crate::shader::*;
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
-        let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
+        //let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
+        let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
 
-        let uv_passthrough_program      = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
+        let screen_texturing_program      = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
         let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
 
         gl::DeleteShader(uv_passthrough_vert);
         gl::DeleteShader(texturig_frag);
         gl::DeleteShader(dda_compute_shader);
-        (uv_passthrough_program,dda_program)
+        (screen_texturing_program,dda_program)
     };
     //panic!("{}GOOD PANIC{}",GREEN,RESET_COL);
 
@@ -133,28 +129,7 @@ fn main() {
     unsafe {
         use std::mem;
         use chunk::BRICK_GRID_SIZE;
-        //use crate::octree::OctreeNode;
-
-        //gl::GenBuffers(1, &mut ssbo);
-        //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
-        //gl::BufferData(
-            //gl::SHADER_STORAGE_BUFFER,
-            //(octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
-            //octree.nodes.as_ptr() as *const _,
-            //gl::DYNAMIC_DRAW,
-        //);
-        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
         
-        gl::GenBuffers(1, &mut ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
-        gl::BufferData(
-            gl::SHADER_STORAGE_BUFFER,
-            (mem::size_of::<chunk::ChunkData>()) as isize,
-            chunk_data.as_ptr() as *const _,
-            gl::DYNAMIC_DRAW,
-        );
-        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
-
         gl::GenBuffers(1, &mut debug_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
         gl::BufferData(
@@ -219,25 +194,22 @@ fn main() {
             dda_program.set_vec3("camera_dir",camera.dir);
             dda_program.set_vec3("light_dir",state.light_dir);
 
-            gl::DispatchCompute(WIDTH /16, 
-                                HEIGHT/16, 1);
-
-            //gl::MemoryBarrier(gl::SHADER_IMAGE_ACCESS_BARRIER_BIT);
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
            
             //Draw texture
-            gl::UseProgram(*uv_passthrough_program);
+            gl::UseProgram(*screen_texturing_program);
             screen_vao.draw_elements(gl::TRIANGLES);
 
-            gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
-            gl::GetBufferSubData(
-                gl::SHADER_STORAGE_BUFFER,
-                0,
-                (debug_data.len() * std::mem::size_of::<i32>()) as _,
-                debug_data.as_mut_ptr() as *mut _,
-            );
+            //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+            //gl::GetBufferSubData(
+                //gl::SHADER_STORAGE_BUFFER,
+                //0,
+                //(debug_data.len() * std::mem::size_of::<i32>()) as _,
+                //debug_data.as_mut_ptr() as *mut _,
+            //);
             //println!("data len: {}",chunk_brickmap.brick_data.len());
-            //println!("og     0: {}",chunk_brickmap.brick_grid[19][19][19]);
+            //println!("og     0: {}",chunk_brickmap.brick_grid[0][0][0]);
             //println!("{}debug 0: {}{}",MAGENTA,debug_data[0],RESET_COL);
         }
 
@@ -252,6 +224,7 @@ fn main() {
                 }
                 glfw::WindowEvent::MouseButton(button, Action::Press, _) => {
                     match button {
+                        /*
                         MouseButton::Button1 => {
                             if let Some((node,t)) = ray::ray_octree(camera.pos,camera.dir,&octree) {
                                 let hit = camera.pos + camera.dir * t;
@@ -296,6 +269,7 @@ fn main() {
                                 }
                             }
                         }
+                    */
                         _ => (),
                     }                
                 }
@@ -354,6 +328,7 @@ fn main() {
         state.d_t = elapsed.as_nanos() as f32 / 1000_000. ; // in millis
         
         let avrg = time_buffer.update(elapsed.as_micros());
-        state.window.set_title(&format!("{:.2}fps ({:.4?})",1./(avrg / 1000_000.),elapsed));
+        let fps_string = format!("{:.2}fps ({:.4?})",1./(avrg / 1000_000.),elapsed);
+        state.window.set_title(&fps_string);
     }
 }

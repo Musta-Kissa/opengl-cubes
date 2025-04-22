@@ -3,10 +3,6 @@ use std::ptr;
 use std::str;
 use std::ffi::CString;
 
-//use gl33::*;
-//use gl33::global_loader::*;
-
-
 use my_math::vec::Vec3;
 
 
@@ -124,9 +120,10 @@ pub unsafe fn compile_shader(shader_type: u32, path: &str) -> u32 {
         let shader_type = match shader_type {
             gl::VERTEX_SHADER =>     "vertex ",
             gl::FRAGMENT_SHADER =>   "fragment ",
+            gl::COMPUTE_SHADER =>   "compute ",
             _ =>                    "",
         };
-        panic!("{shader_type}shader compilation error:\n{}", str::from_utf8(&infolog).unwrap());
+        panic!("{path}\n{shader_type}shader compilation error:\n{}", str::from_utf8(&infolog).unwrap());
     }
 
     shader
