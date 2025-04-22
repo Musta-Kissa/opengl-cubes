@@ -1,4 +1,4 @@
-# A Voxel Raycaster Using DDA
+# A Voxel Raycaster Using DDA (WIP)
 
 ![Screenshot](./screenshots/colors.png)
 ![Screenshot](./screenshots/dda_bricks_2d_2.png)
