@@ -69,31 +69,34 @@ fn clear_screen() {
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
     let mut state = AppState::with_window(win);
-    state.camera.pos= vec3!(chunk::SIZE as f32 * -1.,
-                            chunk::SIZE as f32 *  2.,
-                            chunk::SIZE as f32 * -1.);
+    state.camera.pos= vec3!(chunk::SIZE as f32 * -0.5,
+                            chunk::SIZE as f32 *  1.5,
+                            chunk::SIZE as f32 * -0.5);
     state.camera.dir = vec3!(1.,-1.,1.).norm();
 
-    let mut chunk_brickmap = chunk::gen_brickmap_2d();
+    let mut chunk_brickmap = chunk::gen_brickmap(ivec3!(0,0,0));
     println!("{}",chunk_brickmap.data.len());
     let mut brick_grid_ssbo = 0;
     let mut brick_data_ssbo = 0;
 
     // Load shaders
-    let (screen_texturing_program,dda_program) = unsafe {
+    let (screen_texturing_program,dda_program,clear_texture) = unsafe {
         use crate::shader::*;
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         //let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
         let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
+        let clear_texture_shader        = compile_shader(gl::COMPUTE_SHADER,"./shaders/clear_texture.comp");
 
-        let screen_texturing_program      = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
+        let screen_texturing_program    = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
         let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
+        let clear_texture               = ShaderProgram::create_compute(clear_texture_shader);
 
         gl::DeleteShader(uv_passthrough_vert);
         gl::DeleteShader(texturig_frag);
         gl::DeleteShader(dda_compute_shader);
-        (screen_texturing_program,dda_program)
+        gl::DeleteShader(clear_texture_shader);
+        (screen_texturing_program,dda_program,clear_texture)
     };
 
     let mut screen_mesh = Mesh::new();
@@ -175,10 +178,28 @@ fn main() {
         }
 
         let camera = &state.camera;
+        let mut chunk_positions = vec![
+            ivec3!(0,0,0),
+            ivec3!(0,0,1),
+            ivec3!(1,0,0),
+            ivec3!(1,0,1),
+            ivec3!(2,0,0),
+            ivec3!(0,0,2),
+            ivec3!(2,0,1),
+            ivec3!(1,0,2),
+            ivec3!(2,0,2),
+        ];
+        chunk_positions.sort_by(|&a,&b| {
+            (camera.pos - (a*chunk::SIZE as i32+ (chunk::SIZE as i32/2)).as_vec3() ).mag()
+                .partial_cmp(
+            &(camera.pos - (b*chunk::SIZE as i32+ (chunk::SIZE as i32/2)).as_vec3() ).mag()
+            ).expect("Coundnt compare")
+        });
+
         // RENDER /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         unsafe {
-            gl::Clear(0);
+            //gl::Clear(0);
 
             gl::UseProgram(*dda_program);
             dda_program.set_float("fov",camera.fov);
@@ -187,12 +208,58 @@ fn main() {
             dda_program.set_vec3("camera_dir",camera.dir);
             dda_program.set_vec3("light_dir",state.light_dir);
 
+            for pos in chunk_positions {
+                dda_program.set_ivec3("pos",pos);
+                gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+                gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+            }
+/*
+            dda_program.set_ivec3("pos",ivec3!(0,0,0));
             gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+
+            dda_program.set_ivec3("pos",ivec3!(0,0,1));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+           
+            dda_program.set_ivec3("pos",ivec3!(1,0,0));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+            dda_program.set_ivec3("pos",ivec3!(1,0,1));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+
+            //////
+
+            dda_program.set_ivec3("pos",ivec3!(2,0,0));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+
+            dda_program.set_ivec3("pos",ivec3!(0,0,2));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+           
+            dda_program.set_ivec3("pos",ivec3!(2,0,1));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+            dda_program.set_ivec3("pos",ivec3!(1,0,2));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+
+            dda_program.set_ivec3("pos",ivec3!(2,0,2));
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
+
+*/
            
             //Draw texture
             gl::UseProgram(*screen_texturing_program);
             screen_vao.draw_elements(gl::TRIANGLES);
+            // Clera texture
+
+            gl::UseProgram(*clear_texture);
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
 
             //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
             //gl::GetBufferSubData(

@@ -10,7 +10,7 @@ use crate::octree::Octree;
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 1 << 7;
+pub const SIZE: usize = 1 << 9;
 pub const BRICK_SIZE: usize = 8;
 pub const BRICK_GRID_SIZE:usize = SIZE / BRICK_SIZE;
 
@@ -52,7 +52,7 @@ impl BrickMap {
     }
 }
 
-pub fn gen_brickmap_2d() -> BrickMap {
+pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
     let start = Instant::now();
     let mut brick_map = BrickMap::new();
 
@@ -62,8 +62,8 @@ pub fn gen_brickmap_2d() -> BrickMap {
 
     let get_height = |x,z| {
         let n = noise.get_noise_2d(
-            x as f32 ,
-            z as f32 ,
+            (pos.x + x) as f32 ,
+            (pos.y + z) as f32 ,
         );
         n
     };
@@ -83,9 +83,10 @@ pub fn gen_brickmap_2d() -> BrickMap {
     brick_map
 }
 
-pub fn gen_brickmap() -> BrickMap {
+pub fn gen_brickmap(pos: IVec3) -> BrickMap {
     let start = Instant::now();
     let mut brick_map = BrickMap::new();
+    let mut voxel_count = 0;
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
@@ -93,9 +94,9 @@ pub fn gen_brickmap() -> BrickMap {
 
     let has_voxel = |x,y,z| {
         let n = noise.get_noise_3d(
-            x as f32 ,
-            y as f32 ,
-            z as f32 ,
+            (pos.x + x) as f32 ,
+            (pos.y + y) as f32 ,
+            (pos.z + z) as f32 ,
         );
         return n >= 0.
     };
@@ -105,11 +106,13 @@ pub fn gen_brickmap() -> BrickMap {
             for z in 0..SIZE as i32{
                 if has_voxel(x,y,z) {
                     brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1, color: utils::simple_rng_u32()});
+                    voxel_count += 1;
                 }
             }
         }
     }
     println!("time (brick map): {:?}",start.elapsed());
+    println!("{} voxels",voxel_count);
     brick_map
 }
 

@@ -8,9 +8,7 @@ layout (binding = 0, rgba32f) uniform image2D screen;
 struct RayHit {
     ivec3 voxel_pos;
     ivec3 dir;
-    // -1 exeeded max travel
-    // -2 aabb collition check
-    float dist;
+    float dist; // -1 exeeded max travel; -2 aabb collition check
     int steps;
     uint color;
 };
@@ -31,7 +29,11 @@ layout(std430, binding = 3) buffer BrickDataBuffer {
 };
 
 uniform int SIZE;
-const vec3 POS = vec3(0,0,0);
+uniform ivec3 pos;
+const ivec3 POS = pos * SIZE/BRICK_SIZE;
+
+//const ivec3 POS = ivec3(-SIZE/BRICK_SIZE,0,-SIZE/BRICK_SIZE);
+//const vec3 POS = vec3(0,0,0);
 const uint MAX_UINT = 0xFFFFFFFF;
 
 RayHit dda_3d(vec3 ray_start, vec3 dir);
@@ -43,7 +45,14 @@ uniform vec3 light_dir;
 uniform float fov;
 
 void main() {
+    //vec3 pixel = vec3(0);
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+    vec4 curr_pixel = imageLoad(screen,pixel_coords);
+    //if (curr_pixel != vec4(0) && curr_pixel != vec4(0,1,0,0)) {
+    if (curr_pixel != vec4(0)){
+            return;
+    }
+
     vec2 res = vec2(imageSize(screen));
     if (any(greaterThan(pixel_coords, res)))
         return;
@@ -58,30 +67,34 @@ void main() {
     float scale = tan(radians(fov * 0.5));
     vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
 
-    vec3  pixel = vec3(0.2, 0.3, 0.3);
 
     RayHit ray_hit = dda_3d(camera_pos,ray_dir);
 
     // SHADING
     if (ray_hit.dist > 0.) {
-        vec3 hit = camera_pos + ray_dir * ray_hit.dist;
-
+        //vec3 hit = camera_pos + ray_dir * ray_hit.dist;
         vec3 hit_dir = vec3(ray_hit.dir);
 
         float ambient = 0.05;
         float dot_light = dot(light_dir,hit_dir);
         float ratio = (dot_light + 1.0) / 2.0;
-        vec3 color = normalize(vec3(ray_hit.color << 24 >> 24,ray_hit.color << 16 >> 24,ray_hit.color << 8 >> 24));
-        pixel = (color * ratio) + ambient;
+        vec3 color = normalize(vec3(ray_hit.color << 24 >> 24,
+                                    ray_hit.color << 16 >> 24,
+                                    ray_hit.color <<  8 >> 24));
+        vec3 pixel = (color * ratio) + color * ambient;
+        imageStore(screen, pixel_coords, vec4(pixel,1.0));
     }
-    //if ( ray_hit.dist != -2 ) {
-    //pixel = vec3(float(ray_hit.steps)/100.,0,0);
+    //if ( ray_hit.dist == -2) {
+        //imageStore(screen, pixel_coords, vec4(0,1,0,0));
     //}
-
-    imageStore(screen, pixel_coords, vec4(pixel,1.0));
+    //if ( ray_hit.dist != -2 ) {
+        //vec3 pixel = vec3(float(ray_hit.steps)/100.,0,0);
+        //imageStore(screen, pixel_coords, vec4(pixel,1.0));
+    //}
 }
 
 uint getBrick(ivec3 voxel_pos) {
+    voxel_pos = voxel_pos - POS;
     if (voxel_pos.x < 0 || voxel_pos.x >= SIZE/BRICK_SIZE ||
         voxel_pos.y < 0 || voxel_pos.y >= SIZE/BRICK_SIZE ||
         voxel_pos.z < 0 || voxel_pos.z >= SIZE/BRICK_SIZE )
@@ -188,7 +201,7 @@ RayHit dda_3d(vec3 ray_start, vec3 ray_dir){
 
             RayHit hit = traceBrick(curr_brick_index, uv3d * BRICK_SIZE, ray_dir, mask);
             if (hit.dist > 0.) {
-                hit.voxel_pos += grid_pos*BRICK_SIZE;
+                //hit.voxel_pos += grid_pos*BRICK_SIZE;
                 hit.steps += steps;
                 return hit;
             }

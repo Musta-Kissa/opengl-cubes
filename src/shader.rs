@@ -3,7 +3,7 @@ use std::ptr;
 use std::str;
 use std::ffi::CString;
 
-use my_math::vec::Vec3;
+use my_math::vec::{Vec3,IVec3};
 
 
 #[derive(Clone,Copy)]
@@ -46,6 +46,9 @@ impl ShaderProgram {
     }
     pub unsafe fn set_vec3(self,name: &str,val: Vec3) {
         gl::Uniform3f(GetUniformLocation(self.0,name), val.x, val.y, val.z);
+    }
+    pub unsafe fn set_ivec3(self,name: &str,val: IVec3) {
+        gl::Uniform3i(GetUniformLocation(self.0,name), val.x, val.y, val.z);
     }
     pub unsafe fn set_float(self,name: &str, val: f32) {
         gl::Uniform1f(GetUniformLocation(self.0,name), val);

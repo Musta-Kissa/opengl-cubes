@@ -1,5 +1,7 @@
 # A Voxel Raycaster Using DDA (WIP)
 
+### Rendering 604,798,803 voxels
+![Screenshot](./screenshots/chunks.png)
 ![Screenshot](./screenshots/colors.png)
 ![Screenshot](./screenshots/dda_bricks_2d_2.png)
 ![Screenshot](./screenshots/dda_bricks_2d.png)
