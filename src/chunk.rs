@@ -5,7 +5,6 @@ use std::time::Instant;
 use crate::utils;
 
 use crate::octree::Octree;
-//use crate::octree::Octree;
 
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
@@ -14,6 +13,13 @@ pub const SIZE: usize = 1 << 9;
 pub const BRICK_SIZE: usize = 8;
 pub const BRICK_GRID_SIZE:usize = SIZE / BRICK_SIZE;
 
+pub struct Chunk {
+    pub brickmap: BrickMap,
+    pub brickmap_grid_ssbo: u32,
+    pub brickmap_data_ssbo: u32,
+    pub pos: IVec3,
+}
+
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct Voxel {
@@ -21,10 +27,10 @@ pub struct Voxel {
     pub color: u32,
 }
 pub type Brick = [[[Voxel;8];8];8];
-pub type BrickGrid = Box<[[[u32; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]>;
+pub type BrickGrid = [[[u32; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]; BRICK_GRID_SIZE];
 #[repr(C)]
 pub struct BrickMap {
-    pub grid: BrickGrid,
+    pub grid: Box<BrickGrid>,
     pub data: Vec<Brick>,
 }
 impl BrickMap {
@@ -50,7 +56,38 @@ impl BrickMap {
             data[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
         }
     }
+    pub unsafe fn gen_ssbos(&self) -> (u32,u32) {
+        use std::mem;
+        let chunk_brickmap = &self;
+
+        let mut brick_grid_ssbo = 0;
+        let mut brick_data_ssbo = 0;
+
+        gl::GenBuffers(1, &mut brick_grid_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_grid_ssbo);
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            (mem::size_of::<self::BrickGrid>()) as isize,
+            chunk_brickmap.grid.as_ptr() as *const _,
+            gl::DYNAMIC_DRAW,
+        );
+        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, brick_grid_ssbo);
+
+        gl::GenBuffers(1, &mut brick_data_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_data_ssbo);
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            (mem::size_of::<self::Brick>()) as isize * chunk_brickmap.data.len() as isize,
+            chunk_brickmap.data.as_ptr() as *const _,
+            gl::DYNAMIC_DRAW,
+        );
+        gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
+        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, brick_data_ssbo);
+
+        (brick_grid_ssbo, brick_data_ssbo)
+    }
 }
+
 
 pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
     let start = Instant::now();
@@ -62,18 +99,28 @@ pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
 
     let get_height = |x,z| {
         let n = noise.get_noise_2d(
-            (pos.x + x) as f32 ,
-            (pos.y + z) as f32 ,
+            (pos.x * SIZE as i32 + x) as f32 ,
+            (pos.z * SIZE as i32 + z) as f32 ,
         );
         n
     };
 
     for x in 0..SIZE as i32{
         for z in 0..SIZE as i32{
-            let max_y = get_height(x,z) * 10. + 10.;
+            let max_y = get_height(x,z) * 30. + 40.;
             let mut y = 0;
             while (y as f32) < max_y {
-                brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1, color: utils::simple_rng_u32()});
+                //brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1, color: utils::simple_rng_u32()});
+                let color = unsafe { std::mem::transmute::<f32,u32>(
+                    noise.get_noise_3d(
+                        //(pos.x*SIZE as i32 + x/8) as f32,
+                        //(pos.y*SIZE as i32 + y/8) as f32,
+                        //(pos.z*SIZE as i32 + z/8) as f32)) + 10
+                        (x/8) as f32,
+                        (y/8) as f32,
+                        (z/8) as f32)) + (1 << 16) + (1 << 8) + 1
+                };
+                brick_map.add_voxel(ivec3!(x,y,z), Voxel{ data:1, color });
                 y += 1;
             }
         }
