@@ -57,7 +57,7 @@ pub fn gen_cube(size: i32,pos:Vec3,col: Vec3) -> Mesh<Vertex> {
     for dir in utils::DIRECTIONS {
         for v in chunk::gen_voxel_face(dir,0.,0.,0.) {
             mesh.verts.push( vertex::Vertex {
-                pos: vec3!(v) * size as f32 + pos,
+                pos: Vec3::from_slice(v) * size as f32 + pos,
                 norm: dir,
                 col: col,
             });

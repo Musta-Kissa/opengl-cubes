@@ -116,7 +116,7 @@ impl Default for Camera {
             //dir: vec3!(1e-7,1e-7,1.).norm(),
             pos:Vec3 { x: 13.870341, y: 12.413917, z: 4.1491528 },
             dir:Vec3 { x: -0.5975243, y: -0.6896208, z: 0.40913445 },
-            speed: 1.835,
+            speed: 0.135,
             near: 0.1,
             far: 100.,
             fov: 60.,

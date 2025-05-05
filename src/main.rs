@@ -30,6 +30,7 @@ pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = f64::MAX;
+pub const CHUNK_RADIUS: f32 = 3.5;
 
 struct AppState {
     window: PWindow,
@@ -76,7 +77,7 @@ fn main() {
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
                             //256 as f32 *  1.5,
                             //1900./3.5+ 512.0);
-    state.camera.pos = Vec3 { x: 621.59125, y: 320.88193, z: 638.1524 };
+    state.camera.pos = Vec3 { x: chunk::SIZE as f32 / 2., y: 1320.88193, z: chunk::SIZE as f32 / 2.};
     state.camera.dir = vec3!(-1.,-1.,-1.).norm();
 
 
@@ -117,26 +118,6 @@ fn main() {
     let texture = create_texture(WIDTH,HEIGHT);
     unsafe { gl::BindImageTexture(0, texture, 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::RGBA32F) };
 
-    //#[allow(unused_mut)]
-    //let mut debug_data = vec![0f32;1024];
-    //let mut debug_ssbo = 0;
-    //let mut ssbo = 0;
-
-    //unsafe {
-        //use std::mem;
-        //use chunk::BRICK_GRID_SIZE;
-        //
-        //gl::GenBuffers(1, &mut debug_ssbo);
-        //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
-        //gl::BufferData(
-            //gl::SHADER_STORAGE_BUFFER,
-            //(1024 * mem::size_of::<i32>()) as isize,
-            //debug_data.as_ptr() as *const _,
-            //gl::DYNAMIC_DRAW,
-        //);
-        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, debug_ssbo);
-    //}
-    
     state.window.set_size_polling(true);
     state.window.set_key_polling(true);
     state.window.set_cursor_pos_polling(true);
@@ -144,23 +125,30 @@ fn main() {
 
     let mut time_buffer = utils::TimeBuffer::new(40);
 
-    let (tx, rx) = mpsc::channel();
+    let (out_tx, out_rx) = mpsc::channel();
+    let (request_tx, request_rx) = mpsc::channel();
 
-    let chunk_positions = gen_chunk_pos_in_circle(state.camera.pos/chunk::SIZE as f32,3.5);
+    let mut target_chunks = gen_pos_in_radius(state.camera.pos) ;
+    for pos in &target_chunks {
+        request_tx.send(*pos).unwrap();
+    }
     
-    thread::spawn(move || {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+    let generate_thread_stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_flag = Arc::clone(&generate_thread_stop_flag);
+    let generate_thread = thread::spawn(move || {
         use crate::chunk::Chunk;
-        shared_window.make_current(); // Make the context current in this thread
+        shared_window.make_current();
         gl::load_with(|s| shared_window.get_proc_address(s) as *const _);
-        for pos in chunk_positions {
-            let brickmap = chunk::gen_brickmap_2d(pos);
-            //let ssbo_time = Instant::now();
-            let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
-            //println!("ssbo_time {:?}",ssbo_time.elapsed());
-            let finish_time = Instant::now();
-            unsafe { gl::Flush() };
-            println!("flush {:?}",finish_time.elapsed());
-            tx.send( Chunk { brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos } ).unwrap();
+        while !stop_flag.load(Ordering::Relaxed) {
+            if let Ok(pos) = request_rx.recv_timeout(Duration::from_millis(10)) {
+                let brickmap = chunk::gen_brickmap_2d(pos);
+                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
+
+                unsafe { gl::Flush() }; // Finish sending data to ssbo's
+                out_tx.send( Chunk { brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos } ).unwrap();
+            }
         }
     });
 
@@ -169,25 +157,84 @@ fn main() {
     while !state.window.should_close() {
         let frame_time = Instant::now();
         
-        let recv_time = Instant::now();
-        //match rx.recv_timeout(std::time::Duration::from_micros(1)) {
-        match rx.try_recv() {
-            Ok(chunk) => {
-                chunks.push(chunk);
-            },
-            _ => (),
-        }
-        if frame_time.elapsed() > std::time::Duration::from_millis(16) {
-            println!("time {:?}",frame_time.elapsed());
-        }
-
         state.input.update(&state.window);
         state.camera.update_with_input(&state.input,state.d_t);
         if state.window.get_cursor_mode() == glfw::CursorMode::Disabled {
             state.window.set_cursor_pos((WIDTH /2 ) as f64, (HEIGHT /2 ) as f64);
         }
-
         let camera = &state.camera;
+
+        match out_rx.try_recv() {
+            Ok(chunk) => {
+                chunks.push(chunk);
+            },
+            _ => (),
+        }
+        println!("CHUNK NUMBER: {} TARGER: {}",chunks.len(),target_chunks.len());
+
+        // UPDATE CHUNKS
+        {
+            let camera_pos = camera.pos / chunk::SIZE as f32;
+            let r_squared = CHUNK_RADIUS*CHUNK_RADIUS;
+
+            //target_chunks.retain(|pos| {
+                //let dx = pos.x as f32 + 0.5 - camera_pos.x;
+                //let dz = pos.z as f32 + 0.5 - camera_pos.z;
+                //(dx*dx + dz*dz) <= r_squared // CHUNK POS IS STILL VALID
+            //});
+
+            // REMOVE CHUNKS
+            let mut i = 0;
+            while i < chunks.len() {
+                let pos = chunks[i].pos;
+                let dx = pos.x as f32 + 0.5 - camera_pos.x;
+                let dz = pos.z as f32 + 0.5 - camera_pos.z;
+                if (dx*dx + dz*dz) <= r_squared { // CHUNK POS IS STILL VALID
+                    i+=1;
+                } else { // REMOVE CHUNK
+                    unsafe {
+                    gl::DeleteBuffers(1, &chunks[i].brickmap_grid_ssbo);
+                    gl::DeleteBuffers(1, &chunks[i].brickmap_data_ssbo);
+                    }
+                    //remove_by_value(&mut target_chunks,&chunks[i].pos);
+                    chunks.swap_remove(i);
+                }
+            }
+            target_chunks.retain(|pos| {
+                let dx = pos.x as f32 + 0.5 - camera_pos.x;
+                let dz = pos.z as f32 + 0.5 - camera_pos.z;
+                (dx*dx + dz*dz) <= r_squared // CHUNK POS IS STILL VALID
+            });
+
+            // ADD CHUNKS
+            let min_x = (camera_pos.x - CHUNK_RADIUS).floor() as i32;
+            let min_z = (camera_pos.z - CHUNK_RADIUS).floor() as i32;
+            let max_x = (camera_pos.x + CHUNK_RADIUS).ceil() as i32;
+            let max_z = (camera_pos.z + CHUNK_RADIUS).ceil() as i32;
+
+            let mut pos_to_add = Vec::new();
+            for x in min_x..=max_x {
+                for z in min_z..=max_z {
+                    let dx = x as f32 + 0.5 - camera_pos.x;
+                    let dz = z as f32 + 0.5 - camera_pos.z;
+                    if (dx*dx + dz*dz) <= r_squared && !target_chunks.contains(&ivec3!(x,0,z)) {
+                        println!("adding {} {} {}",x,0,z);
+                        pos_to_add.push(ivec3!(x,0,z));
+                    }
+                }
+            }
+            let dist_to_camera = |pos: IVec3| {
+                ((pos.as_vec3() + 0.5) - camera_pos).mag()
+            };
+            pos_to_add.sort_by(|a,b| {
+                dist_to_camera(*a).partial_cmp(&dist_to_camera(*b))
+                .expect("Coundnt compare")
+            });
+            for pos in pos_to_add {
+                target_chunks.push(pos);
+                request_tx.send(pos);
+            }
+        }
         
         let dist_to_camera = |pos: IVec3| {
             (camera.pos - (pos * chunk::SIZE as i32 + (chunk::SIZE as i32/2)).as_vec3() ).mag()
@@ -197,7 +244,6 @@ fn main() {
             .expect("Coundnt compare")
         });
 
-        
         // RENDER /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         unsafe {
@@ -226,18 +272,6 @@ fn main() {
             gl::UseProgram(*clear_texture);
             gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             //gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
-            
-
-            //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
-            //gl::GetBufferSubData(
-                //gl::SHADER_STORAGE_BUFFER,
-                //0,
-                //(debug_data.len() * std::mem::size_of::<i32>()) as _,
-                //debug_data.as_mut_ptr() as *mut _,
-            //);
-            //println!("data len: {}",chunk_brickmap.data.len());
-            //println!("og     0: {}",chunk_brickmap.grid[0][0][0]);
-            //println!("{}debug 0: {}{}",MAGENTA,debug_data[0],RESET_COL);
         }
 
 
@@ -250,57 +284,15 @@ fn main() {
                 WindowEvent::Size(x, y) => {
                     unsafe { gl::Viewport(0, 0, x, y); }
                 }
+                /*
                 glfw::WindowEvent::MouseButton(button, Action::Press, _) => {
                     match button {
-                        /*
                         MouseButton::Button1 => {
-                            if let Some((node,t)) = ray::ray_octree(camera.pos,camera.dir,&octree) {
-                                let hit = camera.pos + camera.dir * t;
-                                let mut pos = node.position;
-                                if node.size != 1 {
-                                    (pos,_) =  ray::dda_3d_octree(hit,camera.dir,node.size as f32 *2.,&octree).unwrap();
-                                }
-                                let hit_dir = ray::hit_direction(hit,camera.dir);
-                                if !octree.add_block(pos - hit_dir.into()) {
-                                    break;
-                                }
-                                unsafe {
-                                    use std::mem;
-                                    use crate::octree::OctreeNode;
-                                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
-                                    gl::BufferData(
-                                        gl::SHADER_STORAGE_BUFFER,
-                                        (octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
-                                        octree.nodes.as_ptr() as *const _,
-                                        gl::DYNAMIC_DRAW,
-                                    );
-                                    gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
-                                }
-                            }
-                        }
                         MouseButton::Button2 => {
-                            if let Some((pos,_)) = ray::dda_3d_octree(camera.pos,camera.dir,100.,&octree) {
-                                if !octree.remove_block(pos) {
-                                    break;
-                                }
-                                unsafe {
-                                    use std::mem;
-                                    use crate::octree::OctreeNode;
-                                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
-                                    gl::BufferData(
-                                        gl::SHADER_STORAGE_BUFFER,
-                                        (octree.nodes.len() * mem::size_of::<OctreeNode>()) as isize,
-                                        octree.nodes.as_ptr() as *const _,
-                                        gl::DYNAMIC_DRAW,
-                                    );
-                                    gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
-                                }
-                            }
-                        }
-                    */
                         _ => (),
                     }                
                 }
+                */
                 _ => (),
             }
         }
@@ -343,21 +335,20 @@ fn main() {
                 _ => (),
             }
         }
-
-        let finish_time = Instant::now();
-        //unsafe { gl::Finish() };
+        let test_time = time::Instant::now();
         state.window.swap_buffers();
 
-        if finish_time.elapsed() > Duration::from_millis(16) {
-            println!("finish time {:?}",finish_time.elapsed());
+        if test_time.elapsed() > Duration::from_millis(17) {
+            println!("buffer swap time: {:?}",test_time.elapsed());
         }
+
         /////////////////////////////////////////////////////////////////////////////////////////////////////////
         thread::sleep(
-                time::Duration::from_micros(
-                    (1./FPS * 1e6 as f64).round() as u64
-                ).saturating_sub(
-                    frame_time.elapsed()
-                )
+            time::Duration::from_micros(
+                (1./FPS * 1e6 as f64).round() as u64
+            ).saturating_sub(
+                frame_time.elapsed()
+            )
         );
 
         let elapsed = frame_time.elapsed();
@@ -367,6 +358,9 @@ fn main() {
         let fps_string = format!("{:.2}fps ({:.4?})",1./(avrg / 1000_000.),elapsed);
         state.window.set_title(&fps_string);
     }
+
+    generate_thread_stop_flag.store(true, Ordering::Relaxed);
+    generate_thread.join();
 }
 fn gen_chunk_pos(size: i32) -> Vec<IVec3> {
     let mut out = Vec::new();
@@ -378,14 +372,15 @@ fn gen_chunk_pos(size: i32) -> Vec<IVec3> {
     }
     out
 }
-fn gen_chunk_pos_in_circle(camera_pos: Vec3, radius: f32) -> Vec<IVec3> {
+fn gen_pos_in_radius(camera_pos: Vec3) -> Vec<IVec3> {
+    let camera_pos = camera_pos / chunk::SIZE as f32;
     let mut positions = Vec::new();
-    let r_squared = radius * radius;
+    let r_squared = CHUNK_RADIUS*CHUNK_RADIUS;
 
-    let min_x = (camera_pos.x - radius).floor() as i32;
-    let max_x = (camera_pos.x + radius).ceil() as i32;
-    let min_z = (camera_pos.z - radius).floor() as i32;
-    let max_z = (camera_pos.z + radius).ceil() as i32;
+    let min_x = (camera_pos.x - CHUNK_RADIUS).floor() as i32;
+    let max_x = (camera_pos.x + CHUNK_RADIUS).ceil() as i32;
+    let min_z = (camera_pos.z - CHUNK_RADIUS).floor() as i32;
+    let max_z = (camera_pos.z + CHUNK_RADIUS).ceil() as i32;
 
     for x in min_x..=max_x {
         for z in min_z..=max_z {
@@ -397,11 +392,17 @@ fn gen_chunk_pos_in_circle(camera_pos: Vec3, radius: f32) -> Vec<IVec3> {
         }
     }
     let dist_to_camera = |pos: IVec3| {
-        (camera_pos- (pos * chunk::SIZE as i32 + (chunk::SIZE as i32/2)).as_vec3() ).mag()
+        ((pos.as_vec3() + 0.5) - camera_pos).mag()
     };
     positions.sort_by(|a,b| {
         dist_to_camera(*a).partial_cmp(&dist_to_camera(*b))
         .expect("Coundnt compare")
     });
     positions
+}
+
+fn remove_by_value<T: std::cmp::PartialEq<T>>(vec: &mut Vec<T>, value: &T) {
+    if let Some(index) = vec.iter().position(|x| *x == *value) {
+        vec.remove(index);
+    }
 }

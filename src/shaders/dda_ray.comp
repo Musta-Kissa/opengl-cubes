@@ -171,7 +171,7 @@ float mask_vec3(vec3 v, vec3 mask) {
 
 
 RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
-    ray_start = clamp(ray_start, vec3(0.0001), vec3(7.9999));
+    ray_start = clamp(ray_start, vec3(0.000001), vec3(7.999999));
     vec3 inv_dir = 1.0/ray_dir;
     ivec3 brick_pos = ivec3(floor(ray_start));
     ivec3 step_dir  = ivec3(sign(ray_dir));
@@ -179,7 +179,8 @@ RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
 
     int steps = 0;
     while( all(lessThan         (brick_pos,ivec3(8)) ) && 
-           all(greaterThanEqual (brick_pos,ivec3(0)) ) ){
+           all(greaterThanEqual (brick_pos,ivec3(0)) ) )
+    {
         if (brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
             ivec3 hit_dir = ivec3(mask*step_dir);
             return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps);
