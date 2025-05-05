@@ -1,7 +1,6 @@
 use my_math::prelude::*;
 
 use crate::mesh::gen_cube_skeleton;
-use crate::mesh::gen_cube;
 use crate::mesh::Mesh;
 use crate::vertex::Vertex;
 
@@ -230,6 +229,7 @@ impl Octree {
             mesh.join_with(&gen_cube_skeleton(node.size as i32,node.position));
         }
     }
+    /*
     pub fn gen_mesh(&self) -> Mesh<Vertex> {
         let mut mesh = Mesh::new();
         gen_mesh_recursion(self,&mut mesh,ROOT_IDX as i32);
@@ -247,6 +247,7 @@ impl Octree {
             }
         }
     }
+    */
 }
 pub fn inside_bouds(node: &OctreeNode, pos: IVec3) -> bool {
     let node_pos = node.position;

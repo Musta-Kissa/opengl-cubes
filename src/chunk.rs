@@ -10,7 +10,7 @@ use crate::octree::Octree;
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
 pub const SEED: u64 = 1111;
-pub const SIZE: usize = 1 << 8;
+pub const SIZE: usize = 1 << 9;
 pub const BRICK_SIZE: usize = 8;
 pub const BRICK_GRID_SIZE:usize = SIZE / BRICK_SIZE;
 
@@ -63,7 +63,6 @@ impl BrickMap {
 
         let mut brick_grid_ssbo = 0;
         let mut brick_data_ssbo = 0;
-        let test_time = std::time::Instant::now();
 
         gl::GenBuffers(1, &mut brick_grid_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_grid_ssbo);
@@ -73,19 +72,6 @@ impl BrickMap {
             chunk_brickmap.grid.as_ptr() as *const _,
             gl::DYNAMIC_DRAW,
         );
-        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, brick_grid_ssbo);
-
-        //gl::GenBuffers(1, &mut brick_data_ssbo);
-        //gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_data_ssbo);
-        //gl::BufferData(
-            //gl::SHADER_STORAGE_BUFFER,
-            //(mem::size_of::<self::Brick>()) as isize * chunk_brickmap.data.len() as isize,
-            //chunk_brickmap.data.as_ptr() as *const _,
-            //gl::DYNAMIC_DRAW,
-        //);
-        //gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
-        //gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, brick_data_ssbo);
-        
         
         // Allocate buffer for Brick data, but don't fill it yet
         let total_size = mem::size_of::<self::Brick>() * chunk_brickmap.data.len();
@@ -97,12 +83,11 @@ impl BrickMap {
             std::ptr::null(), // no initial data
             gl::DYNAMIC_DRAW,
         );
-//
-        //// Upload data in chunks
+
+        // Upload data in chunks
         let chunk_size = 1024^2;
         let brick_size = mem::size_of::<self::Brick>();
         let mut offset = 0;
-//
         for chunk in chunk_brickmap.data.chunks(chunk_size) {
             let byte_size = brick_size * chunk.len();
             gl::BufferSubData(
@@ -111,10 +96,6 @@ impl BrickMap {
                 byte_size as isize,
                 chunk.as_ptr() as *const _,
             );
-            //let fence = unsafe { gl::FenceSync(gl::SYNC_GPU_COMMANDS_COMPLETE, 0) };
-            //unsafe {// Timeout: block indefinitely until the GPU finishes
-                //gl::ClientWaitSync( fence, gl::SYNC_FLUSH_COMMANDS_BIT, 0, )
-            //};
             unsafe { gl::Finish() };
             std::thread::sleep(std::time::Duration::from_micros(150));
             offset += byte_size;
@@ -122,30 +103,17 @@ impl BrickMap {
 
         gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
         
-        if test_time.elapsed() > std::time::Duration::from_millis(0) {
-            println!("test time: {:?}",test_time.elapsed());
-        }
-
         (brick_grid_ssbo, brick_data_ssbo)
     }
 }
 
 
 pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
-    let start = Instant::now();
     let mut brick_map = BrickMap::new();
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
     noise.set_frequency(0.0035);
-
-    let mut noise_2 = FastNoiseLite::new(SEED as i32);
-    noise_2.set_noise_type(NoiseType::Perlin);
-    noise_2.set_frequency(0.005);
-
-    let mut noise_3 = FastNoiseLite::new(SEED as i32);
-    noise_3.set_noise_type(NoiseType::Perlin);
-    noise_3.set_frequency(6.);
 
     let get_height = |x,z| {
         //let mut n = (noise_3.get_noise_2d(
@@ -203,7 +171,7 @@ pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
         }
     }
 
-    println!("time (brick map): {:?}",start.elapsed());
+    //println!("time (brick map): {:?}",start.elapsed());
     brick_map
 }
 pub const RED: Color = Color { col: ((1u32 << 9) - 1) << 16 };
@@ -345,14 +313,6 @@ pub fn gen_chunk_octree() -> Octree {
     }
     println!("time (octree): {:?}",start.elapsed());
     return octree;
-
-    //fill_node(&mut octree.head);
-//
-    //fn fill_node(node : &mut OctreeNode) {
-        //if node.children.is_none() {
-             //
-        //}
-    //}
 }
 
 pub fn gen_chunk_data_2d() -> Box<ChunkData> {
@@ -418,141 +378,4 @@ pub fn gen_chunk_data() -> Box<ChunkData> {
     println!("time (array): {:?}",start.elapsed());
     println!("cubes: {}",count);
     return unsafe { Box::from_raw(Box::into_raw(chunk_data) as *mut ChunkData) };
-}
-/*
-pub fn gen_mesh(chunk_data: &Box<ChunkData>) -> Mesh<Vertex> {
-    let mut vert_pos: Vec<Vertex> = Vec::new();
-
-    for x in 0..SIZE {
-        for y in 0..SIZE {
-            for z in 0..SIZE {
-                if !chunk_data[x][y][z] {
-                    continue;
-                }
-                if x == SIZE-1  || !chunk_data[x+1][y][z] {
-                    for v in gen_voxel_face(Vec3::X,x as f32, y as f32, z as f32) {
-                        vert_pos.push( Vertex {
-                            pos: vec3!(v),
-                            norm: DIRECTIONS[0],
-                            col: vec3!(0.7,0.,0.),
-                        });
-                    }
-                }
-                if x == 0 || !chunk_data[x-1][y][z] {
-                    for v in gen_voxel_face(Vec3::NEG_X,x as f32, y as f32, z as f32) {
-                        vert_pos.push( Vertex {
-                            pos: vec3!(v),
-                            norm: DIRECTIONS[1],
-                            col: vec3!(0.7,0.,0.),
-                        });
-                    }
-                }
-                if y == SIZE-1 || !chunk_data[x][y+1][z] {
-                    for v in gen_voxel_face(Vec3::Y,x as f32, y as f32, z as f32) {
-                        vert_pos.push( Vertex {
-                            pos: vec3!(v),
-                            norm: DIRECTIONS[2],
-                            col: vec3!(0.7,0.,0.),
-                        });
-                    }
-                }
-                if y == 0 || !chunk_data[x][y-1][z] {
-                    for v in gen_voxel_face(Vec3::NEG_Y,x as f32, y as f32, z as f32) {
-                        vert_pos.push( Vertex {
-                            pos: vec3!(v),
-                            norm: DIRECTIONS[3],
-                            col: vec3!(0.7,0.,0.),
-                        });
-                    }
-                }
-                if z == SIZE-1 || !chunk_data[x][y][z+1] {
-                    for v in gen_voxel_face(Vec3::Z,x as f32, y as f32, z as f32) {
-                        vert_pos.push( Vertex {
-                            pos: vec3!(v),
-                            norm: DIRECTIONS[4],
-                            col: vec3!(0.7,0.,0.),
-                        });
-                    }
-                }
-                if z == 0 || !chunk_data[x][y][z-1] {
-                    for v in gen_voxel_face(Vec3::NEG_Z,x as f32, y as f32, z as f32) {
-                        vert_pos.push( Vertex {
-                            pos: vec3!(v),
-                            norm: DIRECTIONS[5],
-                            col: vec3!(0.7,0.,0.),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    println!("size: {}",SIZE);
-    println!("triangles: {}",vert_pos.len() / 3);
-
-    Mesh {  indices:gen_indices(vert_pos.len()), verts: vert_pos ,}
-}
-*/
-pub fn gen_indices(len: usize) -> Vec<u32> {
-    let mut indices: Vec<u32> = Vec::new();
-    indices.reserve_exact(len / 4 * 6);
-    //clockwise winding
-    for i in (0..len as u32).step_by(4) {
-        indices.extend([
-            0,1,2,2,3,0
-        ].map(|idx| idx + i));
-    }
-    indices
-}
-pub fn gen_voxel_face(dir:Vec3,x:f32,y:f32,z:f32) -> [[f32;3];4] {
-    match dir {
-    // +X
-    Vec3::X => 
-            [
-            [x+1.,y+0.,z+0.],
-            [x+1.,y+1.,z+0.],
-            [x+1.,y+1.,z+1.],
-            [x+1.,y+0.,z+1.],
-            ],
-    // -X
-    Vec3::NEG_X => 
-            [
-            [x+0.,y+0.,z+0.],
-            [x+0.,y+0.,z+1.],
-            [x+0.,y+1.,z+1.],
-            [x+0.,y+1.,z+0.],
-            ],
-    // +Y
-    Vec3::Y => 
-            [
-            [x+0.,y+1.,z+0.],
-            [x+0.,y+1.,z+1.],
-            [x+1.,y+1.,z+1.],
-            [x+1.,y+1.,z+0.],
-            ],
-    // -Y
-    Vec3::NEG_Y => 
-            [
-            [x+0.,y+0.,z+0.],
-            [x+1.,y+0.,z+0.],
-            [x+1.,y+0.,z+1.],
-            [x+0.,y+0.,z+1.],
-            ],
-    // +Z
-    Vec3::Z =>
-            [
-            [x+1.,y+0.,z+1.],
-            [x+1.,y+1.,z+1.],
-            [x+0.,y+1.,z+1.],
-            [x+0.,y+0.,z+1.],
-            ],
-    // -Z
-    Vec3::NEG_Z =>
-            [
-            [x+1.,y+0.,z+0.],
-            [x+0.,y+0.,z+0.],
-            [x+0.,y+1.,z+0.],
-            [x+1.,y+1.,z+0.],
-            ],
-    _ => panic!("Not cardinal dir"),
-    }
 }

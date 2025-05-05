@@ -17,12 +17,14 @@ extern crate my_math;
 use my_math::prelude::*;
 
 use glfw::{Context, Key, PWindow};
-use std::{time,thread};
+use std::{time,thread::{self,JoinHandle}};
 use std::time::{Instant,Duration};
 use std::sync::mpsc;
 use crate::utils::*;
 use crate::vertex::*;
 use crate::mesh::Mesh;
+use crate::chunk::Chunk;
+use std::sync::{Arc,Mutex, atomic::{AtomicBool, Ordering}};
 
 use camera::Camera;
 
@@ -31,6 +33,7 @@ pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = f64::MAX;
 pub const CHUNK_RADIUS: f32 = 3.5;
+pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
 struct AppState {
     window: PWindow,
@@ -67,11 +70,6 @@ fn clear_screen() {
 
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
-    
-    let (mut shared_window, _) = win
-        .create_shared(1, 1, "Shared Context", glfw::WindowMode::Windowed)
-        .expect("Failed to create shared context");
-    shared_window.hide();
 
     let mut state = AppState::with_window(win);
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
@@ -127,30 +125,25 @@ fn main() {
 
     let (out_tx, out_rx) = mpsc::channel();
     let (request_tx, request_rx) = mpsc::channel();
+    let request_rx = Arc::new(Mutex::new(request_rx));
 
     let mut target_chunks = gen_pos_in_radius(state.camera.pos) ;
     for pos in &target_chunks {
         request_tx.send(*pos).unwrap();
     }
     
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+    let time = std::time::Instant::now();
 
     let generate_thread_stop_flag = Arc::new(AtomicBool::new(false));
-    let stop_flag = Arc::clone(&generate_thread_stop_flag);
-    let generate_thread = thread::spawn(move || {
-        use crate::chunk::Chunk;
-        shared_window.make_current();
-        gl::load_with(|s| shared_window.get_proc_address(s) as *const _);
-        while !stop_flag.load(Ordering::Relaxed) {
-            if let Ok(pos) = request_rx.recv_timeout(Duration::from_millis(10)) {
-                let brickmap = chunk::gen_brickmap_2d(pos);
-                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
-
-                unsafe { gl::Flush() }; // Finish sending data to ssbo's
-                out_tx.send( Chunk { brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos } ).unwrap();
-            }
-        }
-    });
+    let generate_thread_handles:Vec<JoinHandle<()>> = 
+        (0..GENERATOR_THREAD_COUNT).map(|_| 
+            spawn_generator_thread(
+                &state.window,
+                Arc::clone(&request_rx),
+                Arc::clone(&generate_thread_stop_flag),
+                out_tx.clone(),
+        )).collect();
 
     let mut chunks: Vec<chunk::Chunk> = Vec::new();
 
@@ -170,10 +163,10 @@ fn main() {
             },
             _ => (),
         }
-        println!("CHUNK NUMBER: {} TARGER: {}",chunks.len(),target_chunks.len());
 
         // UPDATE CHUNKS
         {
+            let mut change_flag = false;
             let camera_pos = camera.pos / chunk::SIZE as f32;
             let r_squared = CHUNK_RADIUS*CHUNK_RADIUS;
 
@@ -198,6 +191,7 @@ fn main() {
                     }
                     //remove_by_value(&mut target_chunks,&chunks[i].pos);
                     chunks.swap_remove(i);
+                    change_flag = true;
                 }
             }
             target_chunks.retain(|pos| {
@@ -218,8 +212,8 @@ fn main() {
                     let dx = x as f32 + 0.5 - camera_pos.x;
                     let dz = z as f32 + 0.5 - camera_pos.z;
                     if (dx*dx + dz*dz) <= r_squared && !target_chunks.contains(&ivec3!(x,0,z)) {
-                        println!("adding {} {} {}",x,0,z);
                         pos_to_add.push(ivec3!(x,0,z));
+                        change_flag = true;
                     }
                 }
             }
@@ -233,6 +227,9 @@ fn main() {
             for pos in pos_to_add {
                 target_chunks.push(pos);
                 request_tx.send(pos);
+            }
+            if change_flag {
+                println!("CHUNK NUMBER: {} TARGER: {}",chunks.len(),target_chunks.len());
             }
         }
         
@@ -360,7 +357,9 @@ fn main() {
     }
 
     generate_thread_stop_flag.store(true, Ordering::Relaxed);
-    generate_thread.join();
+    for handle in generate_thread_handles {
+        handle.join().unwrap();
+    }
 }
 fn gen_chunk_pos(size: i32) -> Vec<IVec3> {
     let mut out = Vec::new();
@@ -405,4 +404,41 @@ fn remove_by_value<T: std::cmp::PartialEq<T>>(vec: &mut Vec<T>, value: &T) {
     if let Some(index) = vec.iter().position(|x| *x == *value) {
         vec.remove(index);
     }
+}
+
+fn spawn_generator_thread(
+    window:             &glfw::PWindow,
+    requests:           Arc<Mutex<mpsc::Receiver<IVec3>>>,
+    stop_flag:          Arc<AtomicBool>,
+    out_tx:             mpsc::Sender<Chunk>,
+    //request_rx:         mpsc::Receiver<IVec3>
+    ) -> std::thread::JoinHandle<()> 
+{
+    // TODO: when we unload a chunk that didnt have time to load yet it is sill being generated, waste!
+    
+    let (mut shared_window, _) = window
+        .create_shared(1, 1, "Shared Context 2", glfw::WindowMode::Windowed)
+        .expect("Failed to create shared context");
+    shared_window.hide();
+
+    thread::spawn(move || {
+        shared_window.make_current();
+        gl::load_with(|s| shared_window.get_proc_address(s) as *const _);
+        while !stop_flag.load(Ordering::Relaxed) {
+            let pos = {
+                requests
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_millis(10))
+            };
+            if let Ok(pos) = pos {
+                // Now we have `pos` and can perform the remaining work without holding the lock
+                let brickmap = chunk::gen_brickmap_2d(pos);
+                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
+
+                unsafe { gl::Flush() }; // Finish sending data to ssbo's
+                out_tx.send(Chunk { brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos }).unwrap();
+            }
+        }
+    })
 }
