@@ -3,7 +3,15 @@
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout (binding = 0, rgba32f) uniform image2D screen;
 
-#define BRICK_SIZE 8
+uniform int CHUNK_SIZE;
+uniform ivec3 CHUNK_POS;
+
+const int BRICK_SIZE = 8;
+const int CHUNK_SIZE_BRICK = CHUNK_SIZE/BRICK_SIZE;
+const ivec3 CHUNK_POS_VOXEL = CHUNK_POS * CHUNK_SIZE;
+const ivec3 CHUNK_POS_BRICK = CHUNK_POS * CHUNK_SIZE_BRICK;
+
+const uint MAX_UINT = 0xFFFFFFFF;
 
 struct RayHit {
     ivec3 voxel_pos;
@@ -28,13 +36,6 @@ layout(std430, binding = 3) buffer BrickDataBuffer {
     Brick brickData[];
 };
 
-uniform int SIZE;
-uniform ivec3 pos;
-const ivec3 POS = pos * SIZE/BRICK_SIZE;
-
-//const ivec3 POS = ivec3(-SIZE/BRICK_SIZE,0,-SIZE/BRICK_SIZE);
-//const vec3 POS = vec3(0,0,0);
-const uint MAX_UINT = 0xFFFFFFFF;
 
 RayHit dda_3d(vec3 ray_start, vec3 dir);
 float ray_aabb_cube(vec3 ray_start, vec3 dir, vec3 min_pos, vec3 max_pos);
@@ -93,15 +94,16 @@ void main() {
     //}
 }
 
-uint getBrick(ivec3 voxel_pos) {
-    voxel_pos = voxel_pos - POS;
-    if (voxel_pos.x < 0 || voxel_pos.x >= SIZE/BRICK_SIZE ||
-        voxel_pos.y < 0 || voxel_pos.y >= SIZE/BRICK_SIZE ||
-        voxel_pos.z < 0 || voxel_pos.z >= SIZE/BRICK_SIZE )
+uint getBrick(ivec3 brick_pos) {
+    if (brick_pos.x < 0 || brick_pos.x >= CHUNK_SIZE_BRICK ||
+        brick_pos.y < 0 || brick_pos.y >= CHUNK_SIZE_BRICK ||
+        brick_pos.z < 0 || brick_pos.z >= CHUNK_SIZE_BRICK )
     {
         return 69696969; 
     } else {
-        return brickGrid[voxel_pos.x *SIZE/BRICK_SIZE*SIZE/BRICK_SIZE + voxel_pos.y * SIZE/BRICK_SIZE + voxel_pos.z ];
+        return brickGrid[brick_pos.x * CHUNK_SIZE_BRICK * CHUNK_SIZE_BRICK + 
+                         brick_pos.y * CHUNK_SIZE_BRICK + 
+                         brick_pos.z ];
     }
 }
 
@@ -123,15 +125,16 @@ float mask_vec3(vec3 v, vec3 mask) {
 }
 
 RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
-    ray_start = clamp(ray_start, vec3(0.0001), vec3(7.9999));
-    vec3 inv_dir = 1.0/ray_dir;
+    ray_start       = clamp(ray_start, vec3(0.0001), vec3(7.9999));
+    vec3 inv_dir    = 1.0/ray_dir;
     ivec3 brick_pos = ivec3(floor(ray_start));
     ivec3 step_dir  = ivec3(sign(ray_dir));
-    vec3 axis_dist = ((brick_pos - ray_start) + 0.5 + step_dir * 0.5) * inv_dir;
+    vec3 axis_dist  = ((brick_pos - ray_start) + 0.5 + step_dir * 0.5) * inv_dir;
 
     int steps = 0;
     while( all(lessThan         (brick_pos,ivec3(8)) ) && 
-           all(greaterThanEqual (brick_pos,ivec3(0)) ) ){
+           all(greaterThanEqual (brick_pos,ivec3(0)) ) )
+    {
         if (brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
             ivec3 hit_dir = ivec3(mask*step_dir);
             return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps,brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
@@ -148,6 +151,9 @@ RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
 }
 
 RayHit dda_3d(vec3 ray_start, vec3 ray_dir){
+    // Transform to local coordinate space
+    ray_start -= CHUNK_POS_VOXEL;
+    // Transform to brick coordinates
     ray_start /= BRICK_SIZE;
 
     RayHit hit_out;
@@ -155,8 +161,8 @@ RayHit dda_3d(vec3 ray_start, vec3 ray_dir){
     vec3 inv_dir = 1.0 / ray_dir;
 
     // Initialize t_min and t_max
-    vec3 t0 = (POS - ray_start) * inv_dir;
-    vec3 t1 = (POS + SIZE/BRICK_SIZE - ray_start) * inv_dir; 
+    vec3 t0 = (0 - ray_start) * inv_dir;
+    vec3 t1 = (0 + CHUNK_SIZE_BRICK - ray_start) * inv_dir; 
 
     // Reorder t_min and t_max for each axis
     vec3 t_min = min(t0, t1);

@@ -50,6 +50,7 @@ impl Camera {
             self.dir.rot_quat(delta_x as f32 * self.sensitivity  * (self.fov / 60.), self.up);
         }
 
+
         for key in &keys.pressed {
             match key {
                 Key::Space => self.pos = self.pos + self.speed  * d_t * self.up, // Up

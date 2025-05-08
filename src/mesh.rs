@@ -1,6 +1,4 @@
 use my_math::prelude::*;
-use crate::utils;
-use crate::chunk;
 use crate::vertex;
 use crate::vertex::*;
 

@@ -129,7 +129,7 @@ pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
             //* 16.
             //* 4.;
         //n -= 32.;
-        let mut n = (noise.get_noise_2d(
+        let n = (noise.get_noise_2d(
             (pos.x * SIZE as i32 + x) as f32 ,
             (pos.z * SIZE as i32 + z) as f32 ,
         )+1.)/2. * 50.;
@@ -148,12 +148,9 @@ pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
                 let mut color = RED;
                 //let ratio = y as f64 /50.  as f64 ;
                 //let mut color = blend_color(RED,BLUE, ratio);
-                unsafe {
-                    if ((x / 8) % 2 == 0) ^ ((z / 8) %2 == 0) ^ ((y as i32 / 8) %2 == 0){
-                        color.ch.g = 0b00111111;
-                    } else {
-                    }
-                }
+                if ((x / 8) % 2 == 0) ^ ((z / 8) %2 == 0) ^ ((y as i32 / 8) %2 == 0){
+                    color.ch.g = 0b00111111;
+                }                 
                 //brick_map.add_voxel(ivec3!(x,y,z),Voxel{data:1, color: utils::simple_rng_u32()});
                 //let color = unsafe { std::mem::transmute::<f32,u32>(
                     //noise.get_noise_3d(

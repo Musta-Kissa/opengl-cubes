@@ -11,6 +11,7 @@ mod utils;
 mod shader;
 mod camera;
 mod octree;
+mod entity;
 
 #[macro_use]
 extern crate my_math;
@@ -226,7 +227,7 @@ fn main() {
             });
             for pos in pos_to_add {
                 target_chunks.push(pos);
-                request_tx.send(pos);
+                let _ = request_tx.send(pos);
             }
             if change_flag {
                 println!("CHUNK NUMBER: {} TARGER: {}",chunks.len(),target_chunks.len());
@@ -246,14 +247,14 @@ fn main() {
         unsafe {
             gl::UseProgram(*dda_program);
             dda_program.set_float("fov",camera.fov);
-            dda_program.set_int("SIZE",chunk::SIZE as i32);
+            dda_program.set_int("CHUNK_SIZE",chunk::SIZE as i32);
             dda_program.set_vec3("camera_pos",camera.pos);
             dda_program.set_vec3("camera_dir",camera.dir);
             dda_program.set_vec3("light_dir",state.light_dir);
             
             // Color texture
             for chunk in &chunks {
-                dda_program.set_ivec3("pos",chunk.pos);
+                dda_program.set_ivec3("CHUNK_POS",chunk.pos);
 
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, chunk.brickmap_grid_ssbo);
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, chunk.brickmap_data_ssbo);
@@ -275,8 +276,8 @@ fn main() {
         glfw.poll_events();
         for (_ ,event) in glfw::flush_messages(&events) {
             use glfw::WindowEvent;
-            use glfw::MouseButton;
-            use glfw::Action;
+            //use glfw::MouseButton;
+            //use glfw::Action;
             match event {
                 WindowEvent::Size(x, y) => {
                     unsafe { gl::Viewport(0, 0, x, y); }
@@ -335,8 +336,9 @@ fn main() {
         let test_time = time::Instant::now();
         state.window.swap_buffers();
 
-        if test_time.elapsed() > Duration::from_millis(17) {
-            println!("buffer swap time: {:?}",test_time.elapsed());
+        if test_time.elapsed() > Duration::from_millis(20) {
+            use crate::utils::colors::*;
+            println!("{}buffer swap time: {:?}{}",RED,test_time.elapsed(),RESET_COL);
         }
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -360,16 +362,6 @@ fn main() {
     for handle in generate_thread_handles {
         handle.join().unwrap();
     }
-}
-fn gen_chunk_pos(size: i32) -> Vec<IVec3> {
-    let mut out = Vec::new();
-
-    for x in 0..size {
-        for y in 0..size {
-            out.push(ivec3!(x,0,y));
-        }
-    }
-    out
 }
 fn gen_pos_in_radius(camera_pos: Vec3) -> Vec<IVec3> {
     let camera_pos = camera_pos / chunk::SIZE as f32;
@@ -411,10 +403,10 @@ fn spawn_generator_thread(
     requests:           Arc<Mutex<mpsc::Receiver<IVec3>>>,
     stop_flag:          Arc<AtomicBool>,
     out_tx:             mpsc::Sender<Chunk>,
-    //request_rx:         mpsc::Receiver<IVec3>
     ) -> std::thread::JoinHandle<()> 
 {
     // TODO: when we unload a chunk that didnt have time to load yet it is sill being generated, waste!
+    // MAYBE: Check if chunk pos is valid in the thread? Pass target_chunks?
     
     let (mut shared_window, _) = window
         .create_shared(1, 1, "Shared Context 2", glfw::WindowMode::Windowed)
