@@ -50,21 +50,22 @@ impl Camera {
             self.dir.rot_quat(delta_x as f32 * self.sensitivity  * (self.fov / 60.), self.up);
         }
 
-
         for key in &keys.pressed {
             match key {
-                Key::Space => self.pos = self.pos + self.speed  * d_t * self.up, // Up
-                Key::LeftShift => self.pos = self.pos - self.speed * d_t * self.up, // Down
+                // Devide the movement by 1000 to convert from blocks per millisecond to blocks per
+                // second => (speed == 1.) == one block every second 
+                Key::Space     => self.pos = self.pos + self.speed * d_t / 1000. * self.up, // Up
+                Key::LeftShift => self.pos = self.pos - self.speed * d_t / 1000. * self.up, // Down
 
-                Key::W => self.pos = self.pos + self.speed * d_t * self.forward(),
-                Key::S => self.pos = self.pos + self.speed * d_t * self.back(),
+                Key::W => self.pos = self.pos + self.speed * d_t / 1000. * self.forward(),
+                Key::S => self.pos = self.pos + self.speed * d_t / 1000.* self.back(),
 
-                Key::D => self.pos = self.pos + self.speed * d_t * self.right(),
-                Key::A => self.pos = self.pos + self.speed * d_t * self.left(),
+                Key::D => self.pos = self.pos + self.speed * d_t / 1000.* self.right(),
+                Key::A => self.pos = self.pos + self.speed * d_t / 1000.* self.left(),
 
                 Key::K => {
                     self.speed = self.speed * (1. + 0.05 * d_t / 16.);
-                    println!("speed: {}", self.speed);
+                    println!("speed: {} {}", self.speed,d_t);
                 }
                 Key::J => {
                     self.speed = self.speed * (1. - 0.05 * d_t / 16.);
@@ -117,7 +118,7 @@ impl Default for Camera {
             //dir: vec3!(1e-7,1e-7,1.).norm(),
             pos:Vec3 { x: 13.870341, y: 12.413917, z: 4.1491528 },
             dir:Vec3 { x: -0.5975243, y: -0.6896208, z: 0.40913445 },
-            speed: 0.135,
+            speed: 1.000,
             near: 0.1,
             far: 100.,
             fov: 60.,

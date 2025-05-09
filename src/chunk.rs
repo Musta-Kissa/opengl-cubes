@@ -29,12 +29,13 @@ pub struct Voxel {
 }
 pub type Brick = [[[Voxel;8];8];8];
 pub struct BrickGrid {
-    arr: Vec<u32>,
-    size: IVec3,
+    pub arr: Vec<u32>,
+    pub size: IVec3,
 }
 impl BrickGrid {
-    pub fn new(size: IVec3, arr: Vec<u32>) -> Self {
-        Self { arr, size }
+    pub fn new(size: IVec3) -> Self {
+        let len = (size.x * size.y * size.z) as usize;
+        Self { arr: vec![u32::MAX; len], size }
     }
     pub fn at(&mut self,x:usize,y:usize,z:usize) -> &mut u32 {
         let index = x * self.size.y as usize * self.size.z as usize + 
@@ -51,15 +52,16 @@ impl BrickGrid {
 }
 #[repr(C)]
 pub struct BrickMap {
-    //pub grid: Box<BrickGrid>,
     pub grid: BrickGrid,
     pub data: Vec<Brick>,
 }
 impl BrickMap {
     pub fn new(size: IVec3) -> Self {
-        let len = (size.x * size.y * size.z) as usize;
+        assert!(size.x % 8 == 0 &&
+                size.y % 8 == 0 &&
+                size.z % 8 == 0);
         Self {
-            grid: BrickGrid::new(size,vec![u32::MAX; len]),
+            grid: BrickGrid::new(size/8),
             data: Vec::new(),
         }
     }
@@ -130,7 +132,7 @@ impl BrickMap {
 
 
 pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
-    let mut brick_map = BrickMap::new(ivec3!(BRICK_GRID_SIZE));
+    let mut brick_map = BrickMap::new(ivec3!(SIZE));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);

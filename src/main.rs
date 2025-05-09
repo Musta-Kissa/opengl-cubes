@@ -76,28 +76,32 @@ fn main() {
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
                             //256 as f32 *  1.5,
                             //1900./3.5+ 512.0);
-    state.camera.pos = Vec3 { x: chunk::SIZE as f32 / 2., y: 1320.88193, z: chunk::SIZE as f32 / 2.};
-    state.camera.dir = vec3!(-1.,-1.,-1.).norm();
+    //state.camera.pos = Vec3 { x: chunk::SIZE as f32 / 2., y: 220.88193, z: chunk::SIZE as f32 / 2.};
+    state.camera.pos = vec3!(15.,313.,12.);
+    state.camera.dir = vec3!(1.,0.,0.).norm();
+    state.camera.speed = 64.;
 
 
     // Load shaders
-    let (screen_texturing_program,dda_program,clear_texture) = unsafe {
+    let (screen_texturing_program,dda_program,clear_texture,draw_entity_program) = unsafe {
         use crate::shader::*;
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         //let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
         let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
         let clear_texture_shader        = compile_shader(gl::COMPUTE_SHADER,"./shaders/clear_texture.comp");
+        let draw_entity_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/draw_entity.comp");
 
         let screen_texturing_program    = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
         let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
         let clear_texture               = ShaderProgram::create_compute(clear_texture_shader);
+        let draw_entity_program         = ShaderProgram::create_compute(draw_entity_shader);
 
         gl::DeleteShader(uv_passthrough_vert);
         gl::DeleteShader(texturig_frag);
         gl::DeleteShader(dda_compute_shader);
         gl::DeleteShader(clear_texture_shader);
-        (screen_texturing_program,dda_program,clear_texture)
+        (screen_texturing_program,dda_program,clear_texture,draw_entity_program)
     };
 
     let mut screen_mesh = Mesh::new();
@@ -147,6 +151,8 @@ fn main() {
         )).collect();
 
     let mut chunks: Vec<chunk::Chunk> = Vec::new();
+    let mut entity = entity::gen_entity();
+    println!("{:?}",entity.brickmap.grid.arr.len());
 
     while !state.window.should_close() {
         let frame_time = Instant::now();
@@ -245,6 +251,18 @@ fn main() {
         // RENDER /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         unsafe {
+            let (local_ray_pos,local_ray_dir) = entity::ray_to_local(&entity,camera.pos,camera.dir);
+            gl::UseProgram(*draw_entity_program);
+            draw_entity_program.set_ivec3("ENTITY_SIZE",entity.size);
+            draw_entity_program.set_float("fov",camera.fov);
+            draw_entity_program.set_vec3("camera_pos",local_ray_pos);
+            draw_entity_program.set_vec3("camera_dir",local_ray_dir);
+            draw_entity_program.set_vec3("light_dir",state.light_dir);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, entity.brickmap_grid_ssbo);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, entity.brickmap_data_ssbo);
+
+            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+
             gl::UseProgram(*dda_program);
             dda_program.set_float("fov",camera.fov);
             dda_program.set_int("CHUNK_SIZE",chunk::SIZE as i32);
@@ -261,7 +279,6 @@ fn main() {
 
                 gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             }
-            //gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
             
             // Draw texture
             gl::UseProgram(*screen_texturing_program);
@@ -329,6 +346,8 @@ fn main() {
                 Key::Escape => state.window.set_should_close(true),
 
                 Key::H => state.light_dir.rot_quat(1. * state.d_t / 16. ,vec3!(-1.,0.,1.)),
+
+                Key::U => entity.pos = entity.pos - Vec3::Y * state.d_t / 16.,
 
                 _ => (),
             }

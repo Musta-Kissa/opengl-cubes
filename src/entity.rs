@@ -1,14 +1,70 @@
 use my_math::prelude::*;
+use crate::chunk::{self,BrickMap};
 
 pub struct Entity {
-    pos: Vec3,
-    orientation: Quaternion,
-    size: IVec3,
+    pub brickmap: BrickMap,
+    pub brickmap_grid_ssbo: u32,
+    pub brickmap_data_ssbo: u32,
+
+    pub pos: Vec3,
+    pub orientation: Quaternion,
+    pub size: IVec3,
+}
+
+pub fn gen_entity() -> Entity {
+    let pos = vec3!(15.,313.,12.);
+    let orientation = Quaternion::from_axis_angle(Vec3::Y,45.);
+    let size = ivec3!(8,16,32);
+    let mut brickmap = BrickMap::new(size);    
+
+    let center = size.as_vec3() / 2.0; // Center of the sphere
+
+    let is_in_ellipsoid = |x:i32, y:i32, z:i32| {
+        let normalized_x = (x as f32 - center.x) / center.x;
+        let normalized_y = (y as f32 - center.y) / center.y;
+        let normalized_z = (z as f32 - center.z) / center.z;
+
+        return normalized_x.powi(2) + normalized_y.powi(2) + normalized_z.powi(2) < 1.0;
+    };
+
+    for x in 0..size.x {
+        for y in 0..size.y {
+            for z in 0..size.z {
+                if is_in_ellipsoid(x,y,z) {
+                    brickmap.add_voxel(ivec3!(x,y,z), chunk::Voxel{ data:1, color: 1});
+                }
+            }
+        }
+    }
+    let ( brickmap_grid_ssbo, brickmap_data_ssbo,) = unsafe { brickmap.gen_ssbos() };
+
+    Entity { 
+        brickmap,
+        brickmap_grid_ssbo,
+        brickmap_data_ssbo,
+        pos,
+        orientation,
+        size,
+    }
+}
+
+pub fn ray_to_local(entity: &Entity, ray_origin:Vec3,ray_dir:Vec3) -> (Vec3,Vec3) {
+    let half_size = (entity.size/2).as_vec3();
+    let entity_middle = entity.pos + half_size;
+    let inv_orientation = entity.orientation.conjugate();
+    // transform the ray_origin to local coordinates 
+    let relative_pos = ray_origin - entity_middle;
+
+    // rotate around the middle of the entity in local coordinates 
+    // and move the ray so the entities neg corner is at 0,0,0
+    let ray_origin_local    = rot_vec_by_quat(relative_pos,&inv_orientation) + half_size;
+    let ray_dir_local       = rot_vec_by_quat(ray_dir,&inv_orientation);
+    (ray_origin_local,ray_dir_local)
 }
 
 #[allow(unused_variables)]
 /// Assuming etities orientation is normalized
-fn ray_entity(entity: &Entity, ray_origin: Vec3, ray_dir: Vec3) -> bool {
+pub fn ray_entity(entity: &Entity, ray_origin: Vec3, ray_dir: Vec3) -> bool {
     let half_size = (entity.size/2).as_vec3();
     let entity_middle = entity.pos + half_size;
     let inv_orientation = entity.orientation.conjugate();
@@ -28,7 +84,7 @@ fn ray_entity(entity: &Entity, ray_origin: Vec3, ray_dir: Vec3) -> bool {
 }
 
 /// Assuming the aabb neg corner is at 0,0,0
-fn ray_aabb(ray_origin: Vec3, ray_dir: Vec3, /*pos: Vec3,*/ size: Vec3) -> Option<f32> {
+pub fn ray_aabb(ray_origin: Vec3, ray_dir: Vec3, /*pos: Vec3,*/ size: Vec3) -> Option<f32> {
     //let min_corner = pos;
     //let max_corner = pos ze;
 

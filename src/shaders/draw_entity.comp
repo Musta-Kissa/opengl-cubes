@@ -1,0 +1,217 @@
+#version 430
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout (binding = 0, rgba32f) uniform image2D screen;
+
+const int BRICK_SIZE = 8;
+const uint MAX_UINT = 0xFFFFFFFF;
+const uint EMPTY_BRICK = MAX_UINT;
+
+struct RayHit {
+    ivec3 voxel_pos;
+    ivec3 dir;
+    float dist; // -1 exeeded max travel; -2 aabb collition check
+    int steps;
+    uint color;
+};
+
+struct Voxel {
+    int data;
+    uint color;
+};
+struct Brick {
+    Voxel data[BRICK_SIZE][BRICK_SIZE][BRICK_SIZE];
+};
+
+layout(std430, binding = 2) buffer BrickGridBuffer {
+    uint brickGrid[];
+};
+layout(std430, binding = 3) buffer BrickDataBuffer {
+    Brick brickData[];
+};
+
+uniform ivec3 ENTITY_SIZE;
+const ivec3 ENTITY_SIZE_BIRCK = ENTITY_SIZE/BRICK_SIZE;
+uniform vec3 camera_pos;
+uniform vec3 camera_dir;
+uniform vec3 light_dir;
+uniform float fov;
+
+RayHit ray_entity(vec3 ray_start, vec3 ray_dir);
+RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask);
+vec3 step_mask(vec3 dist);
+uint getBrick(ivec3 brick_pos);
+float mask_vec3(vec3 v, vec3 mask);
+
+/// Assuming the entity neg corner is at (0,0,0) 
+/// and the camera was transformed into the local coordinates
+void main() {
+    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+    vec4 curr_pixel = imageLoad(screen,pixel_coords);
+
+    if (curr_pixel != vec4(0)){
+            return;
+    }
+
+    vec2 res = vec2(imageSize(screen));
+    if (any(greaterThan(pixel_coords, res)))
+        return;
+
+	vec2 ndc = (vec2(pixel_coords) * 2 - res) / res;
+    ndc.x *= res.x / res.y;
+
+    vec3 forward = camera_dir;
+    vec3 left    = normalize(cross(forward, vec3(0.,1.,0.)));
+    vec3 up      = cross(left,forward);
+
+    float scale  = tan(radians(fov * 0.5));
+    vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
+
+    RayHit ray_hit = ray_entity(camera_pos,ray_dir);
+
+    // SHADING
+    if (ray_hit.dist > 0.) {
+        vec3 hit_dir = vec3(ray_hit.dir);
+
+        float ambient = 0.05;
+        float dot_light = dot(light_dir,hit_dir);
+        float ratio = (dot_light + 1.0) / 2.0;
+        vec3 color = normalize(vec3(ray_hit.color << 24 >> 24,
+                                    ray_hit.color << 16 >> 24,
+                                    ray_hit.color <<  8 >> 24));
+        vec3 pixel = (color * ratio) + color * ambient;
+        imageStore(screen, pixel_coords, vec4(pixel,1.0));
+    }
+    //if ( ray_hit.dist == -2) {
+        //imageStore(screen, pixel_coords, vec4(0,1,0,0));
+    //}
+}
+
+RayHit ray_entity(vec3 ray_start, vec3 ray_dir){
+    // Transform to brick coordinates
+    ray_start /= BRICK_SIZE;
+
+    RayHit hit_out;
+    // AABB CUBE CLIP BEGIN
+    vec3 inv_dir = 1.0 / ray_dir;
+
+    // Initialize t_min and t_max
+    vec3 t0 = (0 - ray_start) * inv_dir;
+    vec3 t1 = (0 + ENTITY_SIZE_BIRCK - ray_start) * inv_dir; 
+
+    // Reorder t_min and t_max for each axis
+    vec3 t_min = min(t0, t1);
+    vec3 t_max = max(t0, t1);
+
+    float t_enter = max(max(t_min.x, t_min.y), t_min.z);
+    float t_exit  = min(min(t_max.x, t_max.y), t_max.z);
+
+    // Check for intersection
+    if (!(t_enter <= t_exit && t_exit >= 0.0)) {
+        hit_out.dist = -2.;
+        return hit_out;
+    }
+    if (t_enter > 0.) {
+        ray_start = ray_start + ray_dir * (t_enter - 0.001);
+    } 
+    // AABB CUBE CLIP END
+
+    ivec3 grid_pos = ivec3(floor(ray_start));
+    ivec3 step_dir  = ivec3(sign(ray_dir));
+    vec3 axis_dist = ((grid_pos - ray_start) + 0.5 + step_dir * 0.5) * inv_dir;
+
+    int steps = 0;
+    float max_distance = t_exit - t_enter * float(t_enter >= 0.);
+    //if (t_enter < 0.) {
+        //max_distance = t_exit ;
+    //}else {
+        //max_distance = t_exit - t_enter;
+    //}
+
+    float total_dist = 0.0;
+    vec3 mask = step_mask(axis_dist);
+    while (total_dist < max_distance) {
+        uint curr_brick_index = getBrick(grid_pos);
+        if (curr_brick_index != EMPTY_BRICK) {
+            vec3 intersect = ray_start + ray_dir*total_dist;
+            vec3 uv3d = intersect - grid_pos;
+
+            // Handle edge case where camera origin is inside of block
+            if (grid_pos == floor(ray_start)) 
+                uv3d = ray_start - grid_pos;
+
+            RayHit hit = traceBrick(curr_brick_index, uv3d * BRICK_SIZE, ray_dir, mask);
+            if (hit.dist > 0.) {
+                //hit.voxel_pos += grid_pos*BRICK_SIZE;
+                //hit.steps += steps;
+                return hit;
+            }
+        }
+
+        mask       = step_mask(axis_dist);
+        grid_pos  += ivec3(mask * step_dir);
+        total_dist = mask_vec3(axis_dist, mask);
+        axis_dist += mask * step_dir * inv_dir;
+        steps++;
+    }
+
+    hit_out.dist = -1.;
+    hit_out.steps = steps;
+    return hit_out;
+}
+
+RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
+    ray_start       = clamp(ray_start, vec3(0.0001), vec3(7.9999));
+    vec3 inv_dir    = 1.0/ray_dir;
+    ivec3 brick_pos = ivec3(floor(ray_start));
+    ivec3 step_dir  = ivec3(sign(ray_dir));
+    vec3 axis_dist  = ((brick_pos - ray_start) + 0.5 + step_dir * 0.5) * inv_dir;
+
+    int steps = 0;
+    while( all(lessThan         (brick_pos,ivec3(8)) ) && 
+           all(greaterThanEqual (brick_pos,ivec3(0)) ) )
+    {
+        if (brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
+            ivec3 hit_dir = ivec3(mask*step_dir);
+            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
+        }
+
+        mask       = step_mask(axis_dist);
+        brick_pos += ivec3(mask * step_dir);
+        axis_dist += mask * step_dir * inv_dir;
+        steps++;
+    }
+    RayHit hit_out;
+    hit_out.dist = -1.;
+    return hit_out;
+}
+
+uint getBrick(ivec3 brick_pos) {
+    if (brick_pos.x < 0 || brick_pos.x >= ENTITY_SIZE_BIRCK.x ||
+        brick_pos.y < 0 || brick_pos.y >= ENTITY_SIZE_BIRCK.y ||
+        brick_pos.z < 0 || brick_pos.z >= ENTITY_SIZE_BIRCK.z )
+    {
+        return 69696969; 
+    } else {
+        return brickGrid[brick_pos.x * ENTITY_SIZE_BIRCK.y * ENTITY_SIZE_BIRCK.z + 
+                         brick_pos.y * ENTITY_SIZE_BIRCK.z + 
+                         brick_pos.z ];
+    }
+}
+
+vec3 step_mask(vec3 dist) {
+    // From https://www.shadertoy.com/view/l33XWf
+    bvec3 move;
+    bvec3 pon = lessThan(dist.xyz,dist.yzx);
+
+    move.x = pon.x && !pon.z;
+    move.y = pon.y && !pon.x;
+    move.z = !(move.x || move.y);
+
+    return vec3(move);
+}
+
+float mask_vec3(vec3 v, vec3 mask) {
+    vec3 tmp = mask * v;
+    return max(tmp.x, max(tmp.y,tmp.z));
+}

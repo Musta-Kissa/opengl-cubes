@@ -1,0 +1,5 @@
+1.  Make the chunk load dependend on the distance to the nearest corner
+    and not to the center
+
+2. Fix the chunks that didnt have time to generate before getting unloaded
+   from being generated anyway (check target_chunks in the thread)
