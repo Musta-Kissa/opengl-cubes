@@ -1,5 +1,7 @@
 # A Voxel Raycaster Using DDA (WIP)
 
+### Entities
+![Screenshot](./screenshots/ball_entity.png)
 ### Rendering 604,798,803 voxels
 ![Screenshot](./screenshots/chunks.png)
 ![Screenshot](./screenshots/colors.png)
