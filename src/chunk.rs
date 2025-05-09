@@ -28,16 +28,38 @@ pub struct Voxel {
     pub color: u32,
 }
 pub type Brick = [[[Voxel;8];8];8];
-pub type BrickGrid = [[[u32; BRICK_GRID_SIZE]; BRICK_GRID_SIZE]; BRICK_GRID_SIZE];
+pub struct BrickGrid {
+    arr: Vec<u32>,
+    size: IVec3,
+}
+impl BrickGrid {
+    pub fn new(size: IVec3, arr: Vec<u32>) -> Self {
+        Self { arr, size }
+    }
+    pub fn at(&mut self,x:usize,y:usize,z:usize) -> &mut u32 {
+        let index = x * self.size.y as usize * self.size.z as usize + 
+                    y * self.size.z as usize + 
+                    z;
+        return &mut self.arr[index];
+    }
+    pub fn as_ptr(&self) -> *const u32 {
+        self.arr.as_ptr()
+    }
+    pub fn mem_size(&self) -> usize {
+        4 * self.arr.len()
+    }
+}
 #[repr(C)]
 pub struct BrickMap {
-    pub grid: Box<BrickGrid>,
+    //pub grid: Box<BrickGrid>,
+    pub grid: BrickGrid,
     pub data: Vec<Brick>,
 }
 impl BrickMap {
-    pub fn new() -> Self {
+    pub fn new(size: IVec3) -> Self {
+        let len = (size.x * size.y * size.z) as usize;
         Self {
-            grid: Box::new([[[u32::MAX;BRICK_GRID_SIZE];BRICK_GRID_SIZE];BRICK_GRID_SIZE]),
+            grid: BrickGrid::new(size,vec![u32::MAX; len]),
             data: Vec::new(),
         }
     }
@@ -45,11 +67,11 @@ impl BrickMap {
         let grid_coords :IVec3 = pos.div_floor(8);
         let brick_coords:IVec3 = pos.modulo(8);
 
-        let brick = &mut self.grid[grid_coords.x as usize][grid_coords.y as usize][grid_coords.z as usize];
+        let brick = self.grid.at(grid_coords.x as usize,grid_coords.y as usize,grid_coords.z as usize);
 
         if *brick == u32::MAX {
             *brick = self.data.len() as u32;
-            let mut out = [[[ Voxel{ data: 0 , color: utils::simple_rng_u32()} ;8];8];8];
+            let mut out = [[[ Voxel{ data: 0 , color: utils::simple_rng_u32()} ;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
             out[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
             self.data.push(out);
         } else {
@@ -59,7 +81,6 @@ impl BrickMap {
     }
     pub unsafe fn gen_ssbos(&self) -> (u32,u32) {
         use std::mem;
-        let chunk_brickmap = &self;
 
         let mut brick_grid_ssbo = 0;
         let mut brick_data_ssbo = 0;
@@ -68,13 +89,13 @@ impl BrickMap {
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_grid_ssbo);
         gl::BufferData(
             gl::SHADER_STORAGE_BUFFER,
-            (mem::size_of::<self::BrickGrid>()) as isize,
-            chunk_brickmap.grid.as_ptr() as *const _,
+            self.grid.mem_size() as isize,
+            self.grid.as_ptr() as *const _,
             gl::DYNAMIC_DRAW,
         );
         
         // Allocate buffer for Brick data, but don't fill it yet
-        let total_size = mem::size_of::<self::Brick>() * chunk_brickmap.data.len();
+        let total_size = mem::size_of::<self::Brick>() * self.data.len();
         gl::GenBuffers(1, &mut brick_data_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_data_ssbo);
         gl::BufferData(
@@ -88,7 +109,7 @@ impl BrickMap {
         let chunk_size = 1024^2;
         let brick_size = mem::size_of::<self::Brick>();
         let mut offset = 0;
-        for chunk in chunk_brickmap.data.chunks(chunk_size) {
+        for chunk in (self.data).chunks(chunk_size) {
             let byte_size = brick_size * chunk.len();
             gl::BufferSubData(
                 gl::SHADER_STORAGE_BUFFER,
@@ -109,7 +130,7 @@ impl BrickMap {
 
 
 pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
-    let mut brick_map = BrickMap::new();
+    let mut brick_map = BrickMap::new(ivec3!(BRICK_GRID_SIZE));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
@@ -217,7 +238,7 @@ fn blend_color(c1: Color, c2: Color, ratio: f64) -> Color {
 
 pub fn gen_brickmap(pos: IVec3) -> BrickMap {
     let start = Instant::now();
-    let mut brick_map = BrickMap::new();
+    let mut brick_map = BrickMap::new(ivec3!(BRICK_GRID_SIZE));
     let mut voxel_count = 0;
 
     let mut noise = FastNoiseLite::new(SEED as i32);
