@@ -4,12 +4,12 @@ layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout (binding = 0, rgba32f) uniform image2D screen;
 
 uniform int CHUNK_SIZE;
-uniform ivec3 CHUNK_POS;
+uniform vec3 CHUNK_POS;
 
 const int BRICK_SIZE = 8;
 const int CHUNK_SIZE_BRICK = CHUNK_SIZE/BRICK_SIZE;
-const ivec3 CHUNK_POS_VOXEL = CHUNK_POS * CHUNK_SIZE;
-const ivec3 CHUNK_POS_BRICK = CHUNK_POS * CHUNK_SIZE_BRICK;
+const ivec3 CHUNK_POS_VOXEL = ivec3(CHUNK_POS) * CHUNK_SIZE;
+const ivec3 CHUNK_POS_BRICK = ivec3(CHUNK_POS) * CHUNK_SIZE_BRICK;
 
 const uint MAX_UINT = 0xFFFFFFFF;
 

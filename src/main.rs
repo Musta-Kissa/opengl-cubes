@@ -24,7 +24,7 @@ use std::sync::mpsc;
 use crate::utils::*;
 use crate::vertex::*;
 use crate::mesh::Mesh;
-use crate::chunk::Chunk;
+use crate::entity::Entity;
 use std::sync::{Arc,Mutex, atomic::{AtomicBool, Ordering}};
 
 use camera::Camera;
@@ -32,7 +32,7 @@ use camera::Camera;
 pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
-pub const FPS: f64 = f64::MAX;
+pub const FPS: f64 = 60.;//f64::MAX;
 pub const CHUNK_RADIUS: f32 = 3.5;
 pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
@@ -78,7 +78,7 @@ fn main() {
                             //1900./3.5+ 512.0);
     //state.camera.pos = Vec3 { x: chunk::SIZE as f32 / 2., y: 220.88193, z: chunk::SIZE as f32 / 2.};
     state.camera.pos = vec3!(15.,313.,12.);
-    state.camera.dir = vec3!(1.,0.,0.).norm();
+    state.camera.dir = vec3!(1.,0.0004213,0.003213).norm();
     state.camera.speed = 64.;
 
 
@@ -87,7 +87,6 @@ fn main() {
         use crate::shader::*;
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
-        //let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
         let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
         let clear_texture_shader        = compile_shader(gl::COMPUTE_SHADER,"./shaders/clear_texture.comp");
         let draw_entity_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/draw_entity.comp");
@@ -104,23 +103,13 @@ fn main() {
         (screen_texturing_program,dda_program,clear_texture,draw_entity_program)
     };
 
-    let mut screen_mesh = Mesh::new();
-    screen_mesh.verts = vec![
-        // Positions                            // Texture Coords
-        UvVertex { pos: Vec2::new(-1.,-1.), uv_pos: Vec2::new( 0.0, 0.0) }, // Top-left;
-        UvVertex { pos: Vec2::new(-1., 1.), uv_pos: Vec2::new( 0.0, 1.0) }, // Top-Right
-        UvVertex { pos: Vec2::new( 1., 1.), uv_pos: Vec2::new( 1.0, 1.0) }, // Bottom-Right
-        UvVertex { pos: Vec2::new( 1.,-1.), uv_pos: Vec2::new( 1.0, 0.0) }, // Bottom-Left
-    ];
-    screen_mesh.indices = vec![
-        0, 1, 2, // First triangle
-        2, 3, 0 // Second triangle
-    ];
-    let screen_vao = unsafe { vao_from_mesh(&screen_mesh) };
-
     let texture = create_texture(WIDTH,HEIGHT);
     unsafe { gl::BindImageTexture(0, texture, 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::RGBA32F) };
-
+    let screen_vao = unsafe {
+        let mut vao = 0;
+        gl::GenVertexArrays(1, &mut vao);
+        vao
+    };
     state.window.set_size_polling(true);
     state.window.set_key_polling(true);
     state.window.set_cursor_pos_polling(true);
@@ -150,7 +139,7 @@ fn main() {
                 out_tx.clone(),
         )).collect();
 
-    let mut chunks: Vec<chunk::Chunk> = Vec::new();
+    let mut chunks: Vec<entity::Entity> = Vec::new();
     let mut entity = entity::gen_entity();
     println!("{:?}",entity.brickmap.grid.arr.len());
 
@@ -240,8 +229,8 @@ fn main() {
             }
         }
         
-        let dist_to_camera = |pos: IVec3| {
-            (camera.pos - (pos * chunk::SIZE as i32 + (chunk::SIZE as i32/2)).as_vec3() ).mag()
+        let dist_to_camera = |pos: Vec3| {
+            (camera.pos - ( pos * chunk::SIZE as f32 + (chunk::SIZE as f32/2.) ) ).mag()
         };
         chunks.sort_by(|a,b| {
             dist_to_camera(a.pos).partial_cmp(&dist_to_camera(b.pos))
@@ -272,7 +261,7 @@ fn main() {
             
             // Color texture
             for chunk in &chunks {
-                dda_program.set_ivec3("CHUNK_POS",chunk.pos);
+                dda_program.set_vec3("CHUNK_POS",chunk.pos);
 
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, chunk.brickmap_grid_ssbo);
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, chunk.brickmap_data_ssbo);
@@ -282,7 +271,9 @@ fn main() {
             
             // Draw texture
             gl::UseProgram(*screen_texturing_program);
-            screen_vao.draw_elements(gl::TRIANGLES);
+            gl::BindVertexArray(screen_vao);
+            gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4);
+
             // Clear texture
             gl::UseProgram(*clear_texture);
             gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
@@ -421,7 +412,7 @@ fn spawn_generator_thread(
     window:             &glfw::PWindow,
     requests:           Arc<Mutex<mpsc::Receiver<IVec3>>>,
     stop_flag:          Arc<AtomicBool>,
-    out_tx:             mpsc::Sender<Chunk>,
+    out_tx:             mpsc::Sender<Entity>,
     ) -> std::thread::JoinHandle<()> 
 {
     // TODO: when we unload a chunk that didnt have time to load yet it is sill being generated, waste!
@@ -444,11 +435,11 @@ fn spawn_generator_thread(
             };
             if let Ok(pos) = pos {
                 // Now we have `pos` and can perform the remaining work without holding the lock
-                let brickmap = chunk::gen_brickmap_2d(pos);
+                let brickmap = chunk::gen_chunk_brickmap(pos);
                 let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
 
                 unsafe { gl::Flush() }; // Finish sending data to ssbo's
-                out_tx.send(Chunk { brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos }).unwrap();
+                out_tx.send( Entity { id: -1, brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos: pos.into(), orientation: Quaternion::new(1.0,Vec3::ZERO), size: ivec3!(chunk::SIZE) }).unwrap();
             }
         }
     })

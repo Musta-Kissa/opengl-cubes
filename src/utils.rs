@@ -82,6 +82,7 @@ impl DerefMut for Vao {
     }
 }
 
+
 pub unsafe fn vao_from_mesh<T: VertexAttributes>(mesh:&Mesh<T>) -> Vao {
     let mut vao = Vao::new(mesh.indices.len() as u32); 
     let mut vbo = 0;

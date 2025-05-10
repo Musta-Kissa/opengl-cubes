@@ -1,0 +1,100 @@
+#version 430
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout (binding = 0, rgba32f) uniform image2D screen;
+
+#define BRICK_SIZE = 8;
+
+struct RayHit {
+    ivec3 voxel_pos;
+    ivec3 dir;
+    float dist; // -1 exeeded max travel; -2 aabb collition check
+    int steps;
+    uint color;
+};
+
+struct Voxel {
+    int data;
+    uint color;
+};
+struct Brick {
+    Voxel data[BRICK_SIZE][BRICK_SIZE][BRICK_SIZE];
+};
+
+layout(std430, binding = 2) buffer BrickGridBuffer {
+    uint brickGrid[];
+};
+layout(std430, binding = 3) buffer BrickDataBuffer {
+    Brick brickData[];
+};
+
+uniform vec3 camera_pos;
+uniform vec3 camera_dir;
+uniform vec3 light_dir;
+uniform float fov;
+
+vec3 quatRotate(vec4 q, vec3 v);
+vec3 quatRotateInverse(vec4 q, vec3 v);
+
+/// Assuming the entity neg corner is at (0,0,0) 
+/// and the camera was transformed into the local coordinates
+void main() {
+    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+    vec4 curr_pixel = imageLoad(screen,pixel_coords);
+
+    vec2 res = vec2(imageSize(screen));
+    if (any(greaterThan(pixel_coords, res)))
+        return;
+
+	vec2 ndc = (vec2(pixel_coords) * 2 - res) / res;
+    ndc.x *= res.x / res.y;
+
+    vec3 forward = camera_dir;
+    vec3 left    = normalize(cross(forward, vec3(0.,1.,0.)));
+    vec3 up      = cross(left,forward);
+
+    float scale  = tan(radians(fov * 0.5));
+    vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
+}
+
+
+bool intersectLocalAABB(
+    vec3 ray_origin, 
+    vec3 ray_dir,
+    vec3 entity_position, 
+    vec4 entity_rotation,
+    vec3 entity_size,
+    out float tenter, 
+    out float texit)
+{
+    // Compute center offset in local space
+    vec3 center_middle = 0.5 * entity_size;
+
+    vec3 relative_origin = rayOrigin - (entityPosition + entity_middle);
+    vec3 local_origin = quatRotateInverse(entity_rotation, relative_origin) + centerOffset;
+
+    vec3 local_dir = quatRotateInverse(entity_rotation, ray_dir);
+
+    vec3 inv_dir = 1.0 / local_dir;
+    vec3 t0s = (vec3(0.0) - local_origin) * inv_dir;
+    vec3 t1s = (entity_size - local_origin) * inv_dir;
+
+    vec3 tmin = min(t0s, t1s);
+    vec3 tmax = max(t0s, t1s);
+
+    tenter = max(tmin);
+    texit  = min(tmax);
+
+    return tenter <= texit && texit >= 0.0;
+}
+vec3 quatRotate(vec4 q, vec3 v) {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+vec3 quatRotateInverse(vec4 q, vec3 v) {
+    // is this the same?
+    // return v - 2.0 * cross(q.xyz, cross(q.xyz, v) - q.w * v); // No?
+    // is this?
+    // retunr v - 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); // Maybe?
+    return v + 2.0 * cross(-q.xyz, cross(-q.xyz, v) + q.w * v); // This should be correct...
+}

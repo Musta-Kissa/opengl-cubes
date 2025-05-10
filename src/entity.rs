@@ -2,6 +2,7 @@ use my_math::prelude::*;
 use crate::chunk::{self,BrickMap};
 
 pub struct Entity {
+    pub id: i32,
     pub brickmap: BrickMap,
     pub brickmap_grid_ssbo: u32,
     pub brickmap_data_ssbo: u32,
@@ -39,6 +40,7 @@ pub fn gen_entity() -> Entity {
     let ( brickmap_grid_ssbo, brickmap_data_ssbo,) = unsafe { brickmap.gen_ssbos() };
 
     Entity { 
+        id: -1,
         brickmap,
         brickmap_grid_ssbo,
         brickmap_data_ssbo,

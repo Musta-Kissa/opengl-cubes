@@ -14,12 +14,12 @@ pub const SIZE: usize = 1 << 9;
 pub const BRICK_SIZE: usize = 8;
 pub const BRICK_GRID_SIZE:usize = SIZE / BRICK_SIZE;
 
-pub struct Chunk {
-    pub brickmap: BrickMap,
-    pub brickmap_grid_ssbo: u32,
-    pub brickmap_data_ssbo: u32,
-    pub pos: IVec3,
-}
+//pub struct Chunk {
+    //pub brickmap: BrickMap,
+    //pub brickmap_grid_ssbo: u32,
+    //pub brickmap_data_ssbo: u32,
+    //pub pos: IVec3,
+//}
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -27,7 +27,7 @@ pub struct Voxel {
     pub data: u32,
     pub color: u32,
 }
-pub type Brick = [[[Voxel;8];8];8];
+pub type Brick = [[[Voxel;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
 pub struct BrickGrid {
     pub arr: Vec<u32>,
     pub size: IVec3,
@@ -131,7 +131,7 @@ impl BrickMap {
 }
 
 
-pub fn gen_brickmap_2d(pos: IVec3) -> BrickMap {
+pub fn gen_chunk_brickmap(pos: IVec3) -> BrickMap {
     let mut brick_map = BrickMap::new(ivec3!(SIZE));
 
     let mut noise = FastNoiseLite::new(SEED as i32);
@@ -335,6 +335,7 @@ pub fn gen_chunk_octree() -> Octree {
     return octree;
 }
 
+/*
 pub fn gen_chunk_data_2d() -> Box<ChunkData> {
     let start = Instant::now();
     let mut noise = FastNoiseLite::new(SEED as i32);
@@ -399,3 +400,4 @@ pub fn gen_chunk_data() -> Box<ChunkData> {
     println!("cubes: {}",count);
     return unsafe { Box::from_raw(Box::into_raw(chunk_data) as *mut ChunkData) };
 }
+*/
