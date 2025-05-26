@@ -1,12 +1,7 @@
 #![allow(private_interfaces)]
 use my_math::vec::*;
 
-use std::mem::MaybeUninit;
-use std::time::Instant;
-use crate::utils;
-
-use crate::octree::Octree;
-
+use crate::entity;
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
 pub const SEED: u64 = 1111;
@@ -28,6 +23,71 @@ pub struct Voxel {
     pub color: u32,
 }
 pub type Brick = [[[Voxel;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
+
+pub fn gen_chunk_brickmap(pos: IVec3,) -> (Vec<u32>, Vec<Brick>) {
+    let len = (SIZE/BRICK_SIZE * SIZE/BRICK_SIZE * SIZE/BRICK_SIZE) as usize;
+    let mut brickmap_grid:Vec<u32>   = vec![u32::MAX;len];
+    let mut brickmap_data:Vec<Brick> = Vec::new();
+
+    let mut noise = FastNoiseLite::new(SEED as i32);
+    noise.set_noise_type(NoiseType::Perlin);
+    noise.set_frequency(0.0035);
+
+    let get_height = |x,z| {
+        let n = (noise.get_noise_2d(
+            (pos.x * SIZE as i32 + x) as f32 ,
+            (pos.z * SIZE as i32 + z) as f32 ,
+        )+1.)/2. * 50.;
+        n.clamp(0.,self::SIZE as f32 )
+    };
+
+    for x in 0..SIZE as i32{
+        for z in 0..SIZE as i32{
+            let max_y = get_height(x,z) ;
+            let mut y = 0.;
+            while y  < max_y {
+                let mut color = RED;
+                if ((x / 8) % 2 == 0) ^ ((z / 8) %2 == 0) ^ ((y as i32 / 8) %2 == 0){
+                    color.ch.g = 0b00111111;
+                }                 
+                entity::brickmap_add_voxel(&mut brickmap_grid,&mut brickmap_data, ivec3!(SIZE), ivec3!(x,y,z), Voxel{ data:1, color: unsafe{color.col} });
+                y += 1.;
+            }
+        }
+    }
+
+    (brickmap_grid,brickmap_data)
+}
+pub const RED: Color = Color { col: ((1u32 << 9) - 1) << 16 };
+pub const BLUE: Color = Color { col: (1u32 << 9) - 1 };
+// The order is reversed in memory
+#[derive(Clone, Copy)]
+struct ColorChanels {
+    b: u8,
+    g: u8,
+    r: u8,
+    a: u8,
+}
+#[derive(Clone, Copy)]
+union Color {
+    col: u32,
+    ch: ColorChanels,
+}
+impl std::ops::Mul<f64> for Color {
+    type Output = Color;
+    fn mul(self, rhs: f64) -> Self::Output {
+        unsafe {
+            let a = self.ch.a;
+            let r = (self.ch.r as f64 * rhs).floor() as u8;
+            let g = (self.ch.g as f64 * rhs).floor() as u8;
+            let b = (self.ch.b as f64 * rhs).floor() as u8;
+            Color {
+                ch: ColorChanels { a, r, g, b },
+            }
+        }
+    }
+}
+/*
 pub struct BrickGrid {
     pub arr: Vec<u32>,
     pub size: IVec3,
@@ -139,33 +199,16 @@ pub fn gen_chunk_brickmap(pos: IVec3) -> BrickMap {
     noise.set_frequency(0.0035);
 
     let get_height = |x,z| {
-        //let mut n = (noise_3.get_noise_2d(
-            //((pos.x * self::SIZE as i32+ x ) as f32) / 200.,
-            //((pos.z * self::SIZE as i32+ z ) as f32) / 200.,
-        //) + 1.)
-            //* 16.;
-//
-        //n += (noise_3.get_noise_2d(
-            //((pos.x * self::SIZE as i32 + x ) as f32) / 1000.,
-            //((pos.z * self::SIZE as i32 + z ) as f32) / 1000.,
-        //) + 1.)
-            //* 16.
-            //* 4.;
-        //n -= 32.;
         let n = (noise.get_noise_2d(
             (pos.x * SIZE as i32 + x) as f32 ,
             (pos.z * SIZE as i32 + z) as f32 ,
         )+1.)/2. * 50.;
-        //n += noise_2.get_noise_2d(
-            //(pos.x * SIZE as i32 + x) as f32 ,
-            //(pos.z * SIZE as i32 + z) as f32 ,
-        //) * 2.;
         n.clamp(0.,self::SIZE as f32 )
     };
 
     for x in 0..SIZE as i32{
         for z in 0..SIZE as i32{
-            let max_y = get_height(x,z) ;//* 30. + 40.;
+            let max_y = get_height(x,z) ;
             let mut y = 0.;
             while y  < max_y {
                 let mut color = RED;
@@ -193,35 +236,6 @@ pub fn gen_chunk_brickmap(pos: IVec3) -> BrickMap {
 
     //println!("time (brick map): {:?}",start.elapsed());
     brick_map
-}
-pub const RED: Color = Color { col: ((1u32 << 9) - 1) << 16 };
-pub const BLUE: Color = Color { col: (1u32 << 9) - 1 };
-// The order is reversed in memory
-#[derive(Clone, Copy)]
-struct ColorChanels {
-    b: u8,
-    g: u8,
-    r: u8,
-    a: u8,
-}
-#[derive(Clone, Copy)]
-union Color {
-    col: u32,
-    ch: ColorChanels,
-}
-impl std::ops::Mul<f64> for Color {
-    type Output = Color;
-    fn mul(self, rhs: f64) -> Self::Output {
-        unsafe {
-            let a = self.ch.a;
-            let r = (self.ch.r as f64 * rhs).floor() as u8;
-            let g = (self.ch.g as f64 * rhs).floor() as u8;
-            let b = (self.ch.b as f64 * rhs).floor() as u8;
-            Color {
-                ch: ColorChanels { a, r, g, b },
-            }
-        }
-    }
 }
 
 fn blend_color(c1: Color, c2: Color, ratio: f64) -> Color {
@@ -335,7 +349,6 @@ pub fn gen_chunk_octree() -> Octree {
     return octree;
 }
 
-/*
 pub fn gen_chunk_data_2d() -> Box<ChunkData> {
     let start = Instant::now();
     let mut noise = FastNoiseLite::new(SEED as i32);

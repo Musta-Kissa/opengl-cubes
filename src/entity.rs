@@ -1,9 +1,11 @@
 use my_math::prelude::*;
-use crate::chunk::{self,BrickMap};
+use crate::chunk::{Brick,Voxel,BRICK_SIZE};
+use crate::utils;
 
+#[repr(C)]
 pub struct Entity {
-    pub id: i32,
-    pub brickmap: BrickMap,
+    pub brickmap_grid: Vec<u32>,
+    pub brickmap_data: Vec<Brick>,
     pub brickmap_grid_ssbo: u32,
     pub brickmap_data_ssbo: u32,
 
@@ -12,11 +14,95 @@ pub struct Entity {
     pub size: IVec3,
 }
 
+pub fn brickmap_brick_index_at<'a>(brickmap_grid: &'a mut Vec<u32>, brickmap_size: IVec3, idx: IVec3) -> &'a mut u32 {
+    let index = idx.x * brickmap_size.y/8 * brickmap_size.z/8 + 
+                idx.y * brickmap_size.z/8 + 
+                idx.z;
+    return &mut brickmap_grid[index as usize];
+}
+
+pub unsafe fn brickmap_gen_ssbos(
+    brickmap_grid: &Vec<u32>, 
+    brickmap_data: &Vec<Brick>, 
+) -> (u32,u32) {
+    use std::mem;
+
+    let mut brick_grid_ssbo = 0;
+    let mut brick_data_ssbo = 0;
+
+    gl::GenBuffers(1, &mut brick_grid_ssbo);
+    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_grid_ssbo);
+    gl::BufferData(
+        gl::SHADER_STORAGE_BUFFER,
+        (brickmap_grid.len() * mem::size_of::<u32>()) as isize,
+        brickmap_grid.as_ptr() as *const _,
+        gl::DYNAMIC_DRAW,
+    );
+    
+    // Allocate buffer for Brick data, but don't fill it yet
+    gl::GenBuffers(1, &mut brick_data_ssbo);
+    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_data_ssbo);
+    gl::BufferData(
+        gl::SHADER_STORAGE_BUFFER,
+        (brickmap_data.len() * mem::size_of::<Brick>()) as isize,
+        std::ptr::null(), // no initial data
+        gl::DYNAMIC_DRAW,
+    );
+
+    // Upload data in chunks
+    let chunk_size = 1024^2;
+    let brick_size = mem::size_of::<Brick>();
+    let mut offset = 0;
+    for chunk in (brickmap_data).chunks(chunk_size) {
+        let byte_size = brick_size * chunk.len();
+        gl::BufferSubData(
+            gl::SHADER_STORAGE_BUFFER,
+            offset as isize,
+            byte_size as isize,
+            chunk.as_ptr() as *const _,
+        );
+        unsafe { gl::Finish() };
+        std::thread::sleep(std::time::Duration::from_micros(150));
+        offset += byte_size;
+    }
+
+    gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
+    
+    (brick_grid_ssbo, brick_data_ssbo)
+}
+
+pub fn brickmap_add_voxel(
+    brickmap_grid: &mut Vec<u32>, 
+    brickmap_data: &mut Vec<Brick>, 
+    brickmap_size: IVec3, 
+    voxel_pos: IVec3, 
+    voxel: Voxel
+) {
+    let grid_coords :IVec3 = voxel_pos / 8;
+    let brick_coords:IVec3 = voxel_pos % 8;
+
+    let brickmap_data_len = brickmap_data.len();
+    let brick = brickmap_brick_index_at(brickmap_grid,brickmap_size,grid_coords);
+
+    if *brick == u32::MAX {
+        *brick = brickmap_data_len as u32;
+        let mut out = [[[ Voxel{ data: 0 , color: utils::simple_rng_u32()} ;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
+        out[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
+        brickmap_data.push(out);
+    } else {
+        let brick = *brick;
+        brickmap_data[brick as usize]
+            [brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
+    }
+}
+
 pub fn gen_entity() -> Entity {
     let pos = vec3!(15.,313.,12.);
     let orientation = Quaternion::from_axis_angle(Vec3::Y,45.);
     let size = ivec3!(8,16,32);
-    let mut brickmap = BrickMap::new(size);    
+    let len = (size.x/8 * size.y/8 * size.z/8) as usize;
+    let mut brickmap_grid:Vec<u32>   = vec![u32::MAX;len];
+    let mut brickmap_data:Vec<Brick> = Vec::new();
 
     let center = size.as_vec3() / 2.0; // Center of the sphere
 
@@ -32,16 +118,16 @@ pub fn gen_entity() -> Entity {
         for y in 0..size.y {
             for z in 0..size.z {
                 if is_in_ellipsoid(x,y,z) {
-                    brickmap.add_voxel(ivec3!(x,y,z), chunk::Voxel{ data:1, color: 1});
+                    brickmap_add_voxel(&mut brickmap_grid, &mut brickmap_data, size, ivec3!(x,y,z), Voxel{ data:1, color: 1});
                 }
             }
         }
     }
-    let ( brickmap_grid_ssbo, brickmap_data_ssbo,) = unsafe { brickmap.gen_ssbos() };
+    let ( brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
 
     Entity { 
-        id: -1,
-        brickmap,
+        brickmap_grid,
+        brickmap_data,
         brickmap_grid_ssbo,
         brickmap_data_ssbo,
         pos,

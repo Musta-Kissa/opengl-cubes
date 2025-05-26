@@ -22,10 +22,8 @@ use std::{time,thread::{self,JoinHandle}};
 use std::time::{Instant,Duration};
 use std::sync::mpsc;
 use crate::utils::*;
-use crate::vertex::*;
-use crate::mesh::Mesh;
 use crate::entity::Entity;
-use std::sync::{Arc,Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc,Mutex,RwLock, atomic::{AtomicBool, Ordering}};
 
 use camera::Camera;
 
@@ -33,7 +31,7 @@ pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = 60.;//f64::MAX;
-pub const CHUNK_RADIUS: f32 = 3.5;
+pub const CHUNK_RADIUS: f32 = 4.5;
 pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
 struct AppState {
@@ -53,7 +51,7 @@ impl AppState {
             window,
             camera: Camera::default(),
             d_t: 1.,
-            light_dir: vec3!(1.,1.,0.).norm(),
+            light_dir: Vec3 { x: 0.98123676, y: -0.05549547, z: 0.2620155 }.norm(),
             input: utils::InputTracker::new(),
 
             wireframe: false,
@@ -78,14 +76,14 @@ fn main() {
                             //1900./3.5+ 512.0);
     //state.camera.pos = Vec3 { x: chunk::SIZE as f32 / 2., y: 220.88193, z: chunk::SIZE as f32 / 2.};
     state.camera.pos = vec3!(15.,313.,12.);
-    state.camera.dir = vec3!(1.,0.0004213,0.003213).norm();
+    state.camera.dir = vec3!(1.,-0.5004213,0.003213).norm();
     state.camera.speed = 64.;
 
 
     // Load shaders
     let (screen_texturing_program,dda_program,clear_texture,draw_entity_program) = unsafe {
         use crate::shader::*;
-        let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
+        let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/screen.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
         let clear_texture_shader        = compile_shader(gl::COMPUTE_SHADER,"./shaders/clear_texture.comp");
@@ -121,13 +119,10 @@ fn main() {
     let (request_tx, request_rx) = mpsc::channel();
     let request_rx = Arc::new(Mutex::new(request_rx));
 
-    let mut target_chunks = gen_pos_in_radius(state.camera.pos) ;
-    for pos in &target_chunks {
+    let target_chunk_pos = Arc::new(RwLock::new(gen_pos_in_radius(state.camera.pos)));
+    for pos in target_chunk_pos.read().unwrap().iter() {
         request_tx.send(*pos).unwrap();
     }
-    
-
-    let time = std::time::Instant::now();
 
     let generate_thread_stop_flag = Arc::new(AtomicBool::new(false));
     let generate_thread_handles:Vec<JoinHandle<()>> = 
@@ -136,12 +131,14 @@ fn main() {
                 &state.window,
                 Arc::clone(&request_rx),
                 Arc::clone(&generate_thread_stop_flag),
+                Arc::clone(&target_chunk_pos),
                 out_tx.clone(),
         )).collect();
 
-    let mut chunks: Vec<entity::Entity> = Vec::new();
-    let mut entity = entity::gen_entity();
-    println!("{:?}",entity.brickmap.grid.arr.len());
+
+    let mut entities = Entities::new();
+    let mut chunks: Vec<u32> = Vec::new();
+    let mut entity_handle = entities.add(entity::gen_entity());
 
     while !state.window.should_close() {
         let frame_time = Instant::now();
@@ -155,7 +152,8 @@ fn main() {
 
         match out_rx.try_recv() {
             Ok(chunk) => {
-                chunks.push(chunk);
+                let handle = entities.add(chunk);
+                chunks.push(handle);
             },
             _ => (),
         }
@@ -166,31 +164,26 @@ fn main() {
             let camera_pos = camera.pos / chunk::SIZE as f32;
             let r_squared = CHUNK_RADIUS*CHUNK_RADIUS;
 
-            //target_chunks.retain(|pos| {
-                //let dx = pos.x as f32 + 0.5 - camera_pos.x;
-                //let dz = pos.z as f32 + 0.5 - camera_pos.z;
-                //(dx*dx + dz*dz) <= r_squared // CHUNK POS IS STILL VALID
-            //});
-
             // REMOVE CHUNKS
             let mut i = 0;
             while i < chunks.len() {
-                let pos = chunks[i].pos;
+                let pos = entities.get(chunks[i]).pos / chunk::SIZE as f32;
                 let dx = pos.x as f32 + 0.5 - camera_pos.x;
                 let dz = pos.z as f32 + 0.5 - camera_pos.z;
                 if (dx*dx + dz*dz) <= r_squared { // CHUNK POS IS STILL VALID
                     i+=1;
                 } else { // REMOVE CHUNK
                     unsafe {
-                    gl::DeleteBuffers(1, &chunks[i].brickmap_grid_ssbo);
-                    gl::DeleteBuffers(1, &chunks[i].brickmap_data_ssbo);
+                        let chunk = entities.get(chunks[i]);
+                        gl::DeleteBuffers(1, &chunk.brickmap_grid_ssbo);
+                        gl::DeleteBuffers(1, &chunk.brickmap_data_ssbo);
                     }
-                    //remove_by_value(&mut target_chunks,&chunks[i].pos);
+                    entities.remove(chunks[i]);
                     chunks.swap_remove(i);
                     change_flag = true;
                 }
             }
-            target_chunks.retain(|pos| {
+            target_chunk_pos.write().unwrap().retain(|pos| {
                 let dx = pos.x as f32 + 0.5 - camera_pos.x;
                 let dz = pos.z as f32 + 0.5 - camera_pos.z;
                 (dx*dx + dz*dz) <= r_squared // CHUNK POS IS STILL VALID
@@ -207,7 +200,7 @@ fn main() {
                 for z in min_z..=max_z {
                     let dx = x as f32 + 0.5 - camera_pos.x;
                     let dz = z as f32 + 0.5 - camera_pos.z;
-                    if (dx*dx + dz*dz) <= r_squared && !target_chunks.contains(&ivec3!(x,0,z)) {
+                    if (dx*dx + dz*dz) <= r_squared && !target_chunk_pos.read().unwrap().contains(&ivec3!(x,0,z)) {
                         pos_to_add.push(ivec3!(x,0,z));
                         change_flag = true;
                     }
@@ -220,38 +213,51 @@ fn main() {
                 dist_to_camera(*a).partial_cmp(&dist_to_camera(*b))
                 .expect("Coundnt compare")
             });
+
+            let mut target_chunk_pos_guard = target_chunk_pos.write().unwrap();
             for pos in pos_to_add {
-                target_chunks.push(pos);
+                target_chunk_pos_guard.push(pos);
                 let _ = request_tx.send(pos);
             }
+            drop(target_chunk_pos_guard);
+
             if change_flag {
-                println!("CHUNK NUMBER: {} TARGER: {}",chunks.len(),target_chunks.len());
+                println!("CHUNK NUMBER: {} TARGER: {}",chunks.len(),target_chunk_pos.read().unwrap().len());
             }
         }
         
         let dist_to_camera = |pos: Vec3| {
             (camera.pos - ( pos * chunk::SIZE as f32 + (chunk::SIZE as f32/2.) ) ).mag()
         };
+        //chunks.sort_by(|a,b| {
+            //dist_to_camera(entities.get(*a).pos / chunk::SIZE as f32).partial_cmp(&dist_to_camera(entities.get(*b).pos / chunk::SIZE as f32))
+            //.expect("Coundnt compare")
+        //});
         chunks.sort_by(|a,b| {
-            dist_to_camera(a.pos).partial_cmp(&dist_to_camera(b.pos))
+            dist_to_camera(entities.get(*a).pos / chunk::SIZE as f32).partial_cmp(&dist_to_camera(entities.get(*b).pos / chunk::SIZE as f32))
             .expect("Coundnt compare")
         });
 
         // RENDER /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         unsafe {
-            let (local_ray_pos,local_ray_dir) = entity::ray_to_local(&entity,camera.pos,camera.dir);
             gl::UseProgram(*draw_entity_program);
-            draw_entity_program.set_ivec3("ENTITY_SIZE",entity.size);
-            draw_entity_program.set_float("fov",camera.fov);
-            draw_entity_program.set_vec3("camera_pos",local_ray_pos);
-            draw_entity_program.set_vec3("camera_dir",local_ray_dir);
+
             draw_entity_program.set_vec3("light_dir",state.light_dir);
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, entity.brickmap_grid_ssbo);
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, entity.brickmap_data_ssbo);
+            draw_entity_program.set_float("fov",camera.fov);
+            for entity_handle in entities.depth_sorted_handles(camera.pos) {
+                let entity = entities.get(entity_handle);
+                let (local_ray_pos,local_ray_dir) = entity::ray_to_local(entity,camera.pos,camera.dir);
+                draw_entity_program.set_ivec3("ENTITY_SIZE",entity.size);
+                draw_entity_program.set_vec3("camera_pos",local_ray_pos);
+                draw_entity_program.set_vec3("camera_dir",local_ray_dir);
+                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, entity.brickmap_grid_ssbo);
+                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, entity.brickmap_data_ssbo);
 
-            gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+                gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+            }
 
+            /*
             gl::UseProgram(*dda_program);
             dda_program.set_float("fov",camera.fov);
             dda_program.set_int("CHUNK_SIZE",chunk::SIZE as i32);
@@ -261,6 +267,7 @@ fn main() {
             
             // Color texture
             for chunk in &chunks {
+                let chunk = entities.get(*chunk);
                 dda_program.set_vec3("CHUNK_POS",chunk.pos);
 
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, chunk.brickmap_grid_ssbo);
@@ -268,6 +275,7 @@ fn main() {
 
                 gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             }
+            */
             
             // Draw texture
             gl::UseProgram(*screen_texturing_program);
@@ -338,8 +346,12 @@ fn main() {
 
                 Key::H => state.light_dir.rot_quat(1. * state.d_t / 16. ,vec3!(-1.,0.,1.)),
 
-                Key::U => entity.pos = entity.pos - Vec3::Y * state.d_t / 16.,
+                Key::U => {
+                    let entity = entities.get(entity_handle);
+                    entity.pos = entity.pos - Vec3::X * state.d_t / 16.;
+                }
 
+                Key::C => println!("light_dir {:?}",state.light_dir),
                 _ => (),
             }
         }
@@ -412,12 +424,10 @@ fn spawn_generator_thread(
     window:             &glfw::PWindow,
     requests:           Arc<Mutex<mpsc::Receiver<IVec3>>>,
     stop_flag:          Arc<AtomicBool>,
+    target_chunk_pos:   Arc<RwLock<Vec<IVec3>>>,
     out_tx:             mpsc::Sender<Entity>,
     ) -> std::thread::JoinHandle<()> 
 {
-    // TODO: when we unload a chunk that didnt have time to load yet it is sill being generated, waste!
-    // MAYBE: Check if chunk pos is valid in the thread? Pass target_chunks?
-    
     let (mut shared_window, _) = window
         .create_shared(1, 1, "Shared Context 2", glfw::WindowMode::Windowed)
         .expect("Failed to create shared context");
@@ -434,13 +444,72 @@ fn spawn_generator_thread(
                     .recv_timeout(Duration::from_millis(10))
             };
             if let Ok(pos) = pos {
+                // check if we still want to generate the chunk
+                if !target_chunk_pos.read().unwrap().contains(&pos) {
+                    continue;
+                }
                 // Now we have `pos` and can perform the remaining work without holding the lock
-                let brickmap = chunk::gen_chunk_brickmap(pos);
-                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
+                let (brickmap_grid, brickmap_data) = chunk::gen_chunk_brickmap(pos);
+                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
 
                 unsafe { gl::Flush() }; // Finish sending data to ssbo's
-                out_tx.send( Entity { id: -1, brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos: pos.into(), orientation: Quaternion::new(1.0,Vec3::ZERO), size: ivec3!(chunk::SIZE) }).unwrap();
+                out_tx.send( Entity { 
+                    brickmap_grid, 
+                    brickmap_data, 
+                    brickmap_data_ssbo, 
+                    brickmap_grid_ssbo, 
+                    pos: (pos * chunk::SIZE as i32).into(),
+                    orientation: Quaternion::new(1.0,Vec3::ZERO), 
+                    size: ivec3!(chunk::SIZE) 
+                }).unwrap();
             }
         }
     })
+}
+
+struct Entities {
+    inner: Vec<Option<Entity>>,
+    free_list: Vec<u32>,
+}
+impl Entities {
+    pub fn new() -> Self {
+        Entities { inner: Vec::new(), free_list: Vec::new() }
+    }
+    pub fn add(&mut self,entity: Entity) -> u32 {
+        if let Some(idx) = self.free_list.pop() {
+            self.inner[idx as usize] = Some(entity);
+            return idx;
+        } else {
+            let idx = self.inner.len();
+            self.inner.push(Some(entity));
+            return idx as u32;
+        }
+    }
+    pub fn remove(&mut self, idx: u32) {
+        if idx == self.inner.len() as u32 -1 {
+            self.inner.pop();
+        } else {
+            self.inner[idx as usize] = None;
+            self.free_list.push(idx);
+        }
+    }
+    pub fn get(&mut self,idx: u32) -> &mut Entity {
+        self.inner[idx as usize].as_mut().unwrap()
+    }
+    pub fn depth_sorted_handles(&mut self, camera_pos: Vec3) -> Vec<u32> {
+        let mut all_handles: Vec<u32> = self.inner
+            .iter()
+            .enumerate()
+            .filter_map(|(i, val)| if val.is_some() { Some(i as u32) } else { None })
+            .collect();
+
+        let dist_to_camera = |pos: Vec3| {
+            (camera_pos - ( pos * chunk::SIZE as f32 + (chunk::SIZE as f32/2.) ) ).mag()
+        };
+        all_handles.sort_by(|a,b| {
+            dist_to_camera(self.get(*a).pos / chunk::SIZE as f32).partial_cmp(&dist_to_camera(self.get(*b).pos / chunk::SIZE as f32))
+            .expect("Coundnt compare")
+        });
+        all_handles
+    }
 }
