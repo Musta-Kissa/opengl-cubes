@@ -12,6 +12,7 @@ mod shader;
 mod camera;
 mod octree;
 mod entity;
+mod allocator;
 
 #[macro_use]
 extern crate my_math;
@@ -31,7 +32,7 @@ pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = 60.;//f64::MAX;
-pub const CHUNK_RADIUS: f32 = 4.5;
+pub const CHUNK_RADIUS: f32 = 1.5;
 pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
 struct AppState {
@@ -67,8 +68,14 @@ fn clear_screen() {
     std::io::stdout().flush().unwrap();
 }
 
+use crate::allocator::BrickAllocator;
+use std::sync::OnceLock;
+
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
+
+
+    unsafe { allocator::BrickAllocator::init(2*1024_u32.pow(3)/std::mem::size_of::<chunk::Brick>() as u32) };
 
     let mut state = AppState::with_window(win);
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
@@ -87,7 +94,7 @@ fn main() {
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
         let clear_texture_shader        = compile_shader(gl::COMPUTE_SHADER,"./shaders/clear_texture.comp");
-        let draw_entity_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/draw_entity.comp");
+        let draw_entity_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/draw_entities.comp");
 
         let screen_texturing_program    = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
         let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
@@ -175,8 +182,11 @@ fn main() {
                 } else { // REMOVE CHUNK
                     unsafe {
                         let chunk = entities.get(chunks[i]);
+                        let time = std::time::Instant::now();
+                        //chunk.free_bricks();
+                        println!("free chunk bricks {:?}",time.elapsed());
                         gl::DeleteBuffers(1, &chunk.brickmap_grid_ssbo);
-                        gl::DeleteBuffers(1, &chunk.brickmap_data_ssbo);
+                        //gl::DeleteBuffers(1, &chunk.brickmap_data_ssbo);
                     }
                     entities.remove(chunks[i]);
                     chunks.swap_remove(i);
@@ -248,11 +258,13 @@ fn main() {
             for entity_handle in entities.depth_sorted_handles(camera.pos) {
                 let entity = entities.get(entity_handle);
                 let (local_ray_pos,local_ray_dir) = entity::ray_to_local(entity,camera.pos,camera.dir);
+
                 draw_entity_program.set_ivec3("ENTITY_SIZE",entity.size);
                 draw_entity_program.set_vec3("camera_pos",local_ray_pos);
                 draw_entity_program.set_vec3("camera_dir",local_ray_dir);
-                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, entity.brickmap_grid_ssbo);
-                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, entity.brickmap_data_ssbo);
+
+                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, entity.brickmap_grid_ssbo);
+                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, allocator::BRICK_ALLOCATOR().data_ssbo);
 
                 gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             }
@@ -449,14 +461,13 @@ fn spawn_generator_thread(
                     continue;
                 }
                 // Now we have `pos` and can perform the remaining work without holding the lock
-                let (brickmap_grid, brickmap_data) = chunk::gen_chunk_brickmap(pos);
-                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
+                let brickmap_grid = chunk::gen_chunk_brickmap(pos);
+                //let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
+                let brickmap_grid_ssbo = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid) };
 
                 unsafe { gl::Flush() }; // Finish sending data to ssbo's
                 out_tx.send( Entity { 
                     brickmap_grid, 
-                    brickmap_data, 
-                    brickmap_data_ssbo, 
                     brickmap_grid_ssbo, 
                     pos: (pos * chunk::SIZE as i32).into(),
                     orientation: Quaternion::new(1.0,Vec3::ZERO), 

@@ -1,13 +1,14 @@
 use my_math::prelude::*;
 use crate::chunk::{Brick,Voxel,BRICK_SIZE};
 use crate::utils;
+use crate::allocator::BrickVec;
 
 #[repr(C)]
 pub struct Entity {
     pub brickmap_grid: Vec<u32>,
-    pub brickmap_data: Vec<Brick>,
     pub brickmap_grid_ssbo: u32,
-    pub brickmap_data_ssbo: u32,
+
+    pub brickmap_data: BrickVec,
 
     pub pos: Vec3,
     pub orientation: Quaternion,
@@ -23,7 +24,7 @@ pub fn brickmap_brick_index_at<'a>(brickmap_grid: &'a mut Vec<u32>, brickmap_siz
 
 pub unsafe fn brickmap_gen_ssbos(
     brickmap_grid: &Vec<u32>, 
-    brickmap_data: &Vec<Brick>, 
+    //brickmap_data: &Vec<Brick>, 
 ) -> (u32,u32) {
     use std::mem;
 
@@ -38,6 +39,8 @@ pub unsafe fn brickmap_gen_ssbos(
         brickmap_grid.as_ptr() as *const _,
         gl::DYNAMIC_DRAW,
     );
+
+    /*
     
     // Allocate buffer for Brick data, but don't fill it yet
     gl::GenBuffers(1, &mut brick_data_ssbo);
@@ -65,6 +68,7 @@ pub unsafe fn brickmap_gen_ssbos(
         std::thread::sleep(std::time::Duration::from_micros(150));
         offset += byte_size;
     }
+    */
 
     gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
     
@@ -101,8 +105,9 @@ pub fn gen_entity() -> Entity {
     let orientation = Quaternion::from_axis_angle(Vec3::Y,45.);
     let size = ivec3!(8,16,32);
     let len = (size.x/8 * size.y/8 * size.z/8) as usize;
+
     let mut brickmap_grid:Vec<u32>   = vec![u32::MAX;len];
-    let mut brickmap_data:Vec<Brick> = Vec::new();
+    let mut brickmap_data: Vec<Brick> = Vec::new();
 
     let center = size.as_vec3() / 2.0; // Center of the sphere
 
@@ -123,13 +128,15 @@ pub fn gen_entity() -> Entity {
             }
         }
     }
-    let ( brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
+    let brickmap_data = BrickVec::from_vec(brickmap_data);
+    unsafe { brickmap_data.send() };
+
+    let ( brickmap_grid_ssbo, _brickmap_data_ssbo) = unsafe { brickmap_gen_ssbos(&brickmap_grid) };
 
     Entity { 
         brickmap_grid,
         brickmap_data,
         brickmap_grid_ssbo,
-        brickmap_data_ssbo,
         pos,
         orientation,
         size,
