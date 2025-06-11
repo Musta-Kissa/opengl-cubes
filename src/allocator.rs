@@ -42,6 +42,13 @@ impl BrickAllocator {
             std::ptr::null(), // no initial data
             gl::DYNAMIC_DRAW,
         );
+        let err = gl::GetError();
+        if err != gl::NO_ERROR {
+            panic!("OpenGL error: 0x{:X}", err);
+        } else {
+            println!("Buffer created successfully.");
+        }
+
 
         // Make an unititialized allocation on the heap
         // and cast to Box<[Brick]>, the data is never read directly
@@ -67,7 +74,10 @@ impl BrickAllocator {
         }
     }
     pub fn alloc(&self, len_to_alloc: usize) -> Result<BrickVec,String> {
+        self.print_state();
+        println!("allocating {} bricks => {}MiB",len_to_alloc, len_to_alloc * core::mem::size_of::<Brick>() / (1024*1024));
         let mut free_block_list = self.free_block_list.lock().unwrap();
+        consolidate_free_blocks(&mut free_block_list);
 
         let mut i = 0;
         while i < free_block_list.len() {
@@ -77,12 +87,14 @@ impl BrickAllocator {
                 i += 1;
                 continue; 
             }
+
             let old_free_block_start  = free_block.start;
             // Add to the start of the free block 'len_to_alloc'
             if free_block.len == len_to_alloc {
                 free_block_list.remove(i);
             } else {
                 free_block.start += len_to_alloc;
+                free_block.len   -= len_to_alloc;
             };
 
             return Ok(BrickVec::new(
@@ -93,20 +105,77 @@ impl BrickAllocator {
 
         return Err(format!("No free block with sufficient space"));
     }
-    pub fn free(&mut self, brick_vec: BrickVec) {
+    pub fn free(&self, brick_vec: BrickVec) {
         self.free_block_list.lock().unwrap().push( 
             FreeBlock { 
                 start: brick_vec.start     as usize, 
                 len:   brick_vec.capacity  as usize,
         });
     }
+    pub fn print_state(&self) {
+        let width = 120;
+        let mut buffer = vec!['#'; width];
+
+        let buffer_size = self.max_len;
+
+        for block in self.free_block_list.lock().unwrap().iter() {
+            let start_ratio = block.start as f64 / buffer_size as f64;
+            let end_ratio = (block.start + block.len) as f64 / buffer_size as f64;
+
+            let scaled_start = (start_ratio * width as f64).floor() as usize;
+            let scaled_end = (end_ratio * width as f64).ceil() as usize;
+
+            for i in scaled_start..scaled_end.min(width) {
+                buffer[i] = '.';
+            }
+        }
+
+        // Now insert '|' markers (insert = shift right)
+        let mut marker_positions: Vec<usize> = self.free_block_list.lock().unwrap()
+            .iter()
+            .map(|block| {
+                let start_ratio = block.start as f64 / buffer_size as f64;
+                (start_ratio * width as f64).floor() as usize
+            })
+            .collect();
+
+        // Sort and dedup marker positions to prevent multiple inserts at same location
+        marker_positions.sort_unstable();
+        marker_positions.dedup();
+
+        for (i, pos) in marker_positions.iter().enumerate() {
+            // Adjust insertion point based on how many have already been inserted
+            let adjusted_pos = pos + i;
+            if adjusted_pos <= buffer.len() {
+                buffer.insert(adjusted_pos, '|');
+            }
+        }
+
+        let visualization: String = buffer.into_iter().collect();
+        println!("{}", visualization);
+    }
+}
+
+pub fn consolidate_free_blocks(list: &mut Vec<FreeBlock>) {
+    list.sort_by_key(|k| k.start);
+
+    let mut i = 0;
+    while i < list.len() - 1 {
+        if list[i].start + list[i].len == list[i+1].start {
+            let b_len = list[i+1].len;
+            println!("merging Blocks");
+            list.remove(i+1);
+            list[i].len += b_len;
+        }
+        i+=1;
+    }
 }
 
 pub struct BrickVec {
     ///Start index in the BrickAllocator
-    start:      u32,
-    len:        u32,
-    capacity:   u32,
+    pub start:      u32,
+    pub len:        u32,
+    pub capacity:   u32,
 }
 impl BrickVec {
     pub fn new(start: usize, capacity: usize) -> BrickVec {
@@ -119,16 +188,22 @@ impl BrickVec {
     /// Sends the data to the GPU ssbo
     pub unsafe fn send(&self) {
         let src_ptr = BRICK_ALLOCATOR().data.as_ptr().add(self.start as usize);
+        let offset = self.start as isize * mem::size_of::<Brick>() as isize;
+        let size = self.capacity as isize * mem::size_of::<Brick>() as isize;
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, BRICK_ALLOCATOR().data_ssbo);
-        gl::BufferData(
+        gl::BufferSubData(
             gl::SHADER_STORAGE_BUFFER,
-            self.len as isize * mem::size_of::<Brick>() as isize,
+            offset,
+            size,
             src_ptr as *const _,
-            gl::DYNAMIC_DRAW,
         );
     }
     pub fn from_vec(vec: Vec<Brick>) -> BrickVec {
-        let brick_vec = BRICK_ALLOCATOR().alloc(vec.len()).unwrap();
+        let mut brick_vec = BRICK_ALLOCATOR().alloc(vec.len()).unwrap_or_else(|a| {
+            use crate::colors::*;
+            panic!("{}{}{}",RED,a.to_uppercase(),RESET_COL)
+        });
+        brick_vec.len = vec.len() as u32;
         let brick_vec_ptr: *const Brick = unsafe { BRICK_ALLOCATOR().data.as_ptr().add(brick_vec.start as usize) };
 
         unsafe { ptr::copy_nonoverlapping(vec.as_ptr(),brick_vec_ptr as *mut Brick ,vec.len()) };

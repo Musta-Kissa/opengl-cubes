@@ -24,6 +24,12 @@ struct Brick {
     Voxel data[BRICK_SIZE][BRICK_SIZE][BRICK_SIZE];
 };
 
+struct BrickVec {
+    uint start;
+    uint len;
+    uint capacity;
+};
+
 layout(std430, binding = 1) buffer PerEntityGrid {
     uint brickGrid[];
 };
@@ -31,13 +37,25 @@ layout(std430, binding = 2) buffer BrickAllocator {
     Brick brickData[];
 };
 
+layout(std430, binding = 10) buffer DebugBuffer {
+    float debugNums[];
+};
+
 uniform ivec3 ENTITY_SIZE;
 const ivec3 ENTITY_SIZE_BRICK = ENTITY_SIZE/BRICK_SIZE;
+
 uniform vec3 camera_pos;
 uniform vec3 camera_dir;
 uniform vec3 light_dir;
 uniform float fov;
 
+//uniform BrickVec brick_vec;
+uniform uint brick_vec_start;
+uniform uint brick_vec_len;
+uniform uint brick_vec_capacity;
+
+
+Brick index_vec(uint index);
 vec3 quatRotate(vec4 q, vec3 v);
 vec3 quatRotateInverse(vec4 q, vec3 v);
 bool intersectLocalAABB(
@@ -75,6 +93,8 @@ void main() {
     float scale  = tan(radians(fov * 0.5));
     vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
 
+    debugNums[0] = 420420;
+    debugNums[1] = brick_vec_start;
     RayHit ray_hit = ray_entity(camera_pos,ray_dir);
 
     // SHADING
@@ -176,9 +196,15 @@ RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
     while( all(lessThan         (brick_pos,ivec3(8)) ) && 
            all(greaterThanEqual (brick_pos,ivec3(0)) ) )
     {
-        if (brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
+        /*
+        if (index_vec(brick_index).data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
             ivec3 hit_dir = ivec3(mask*step_dir);
-            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
+            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, index_vec(brick_index).data[brick_pos.x][brick_pos.y][brick_pos.z].color);
+        }
+        */
+        if (brickData[brick_vec_start + brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
+            ivec3 hit_dir = ivec3(mask*step_dir);
+            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, brickData[brick_vec_start + brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
         }
 
         mask       = step_mask(axis_dist);

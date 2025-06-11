@@ -1,6 +1,7 @@
 #![allow(private_interfaces)]
 use my_math::vec::*;
 
+use crate::allocator::BrickVec;
 use crate::entity;
 use fast_noise_lite_rs::{FastNoiseLite, NoiseType};
 
@@ -26,9 +27,10 @@ pub type Brick = [[[Voxel;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
 
 use crate::allocator::BRICK_ALLOCATOR;
 
-pub fn gen_chunk_brickmap(pos: IVec3,) -> Vec<u32> {
+pub fn gen_chunk_brickmap(pos: IVec3,) -> (Vec<u32>,BrickVec) {
     let len = (SIZE/BRICK_SIZE * SIZE/BRICK_SIZE * SIZE/BRICK_SIZE) as usize;
     let mut brickmap_grid:Vec<u32>   = vec![u32::MAX;len];
+    let mut brickmap_data:Vec<Brick> = Vec::new();
 
     let mut noise = FastNoiseLite::new(SEED as i32);
     noise.set_noise_type(NoiseType::Perlin);
@@ -51,16 +53,27 @@ pub fn gen_chunk_brickmap(pos: IVec3,) -> Vec<u32> {
                 if ((x / 8) % 2 == 0) ^ ((z / 8) %2 == 0) ^ ((y as i32 / 8) %2 == 0){
                     color.ch.g = 0b00111111;
                 }                 
-                entity::brickmap_add_voxel(&mut brickmap_grid, ivec3!(SIZE), ivec3!(x,y,z), Voxel{ data:1, color: unsafe{color.col} });
+                entity::brickmap_add_voxel(&mut brickmap_grid,&mut brickmap_data, ivec3!(SIZE), ivec3!(x,y,z), Voxel{ data:1, color: unsafe{color.col} });
+                /*
+                    brickmap_grid: &mut Vec<u32>, 
+                    brickmap_data: &mut Vec<Brick>, 
+                    brickmap_size: IVec3, 
+                    voxel_pos: IVec3, 
+                    voxel: Voxel
+                */
                 y += 1.;
             }
         }
     }
     let time = std::time::Instant::now();
-    //BRICK_ALLOCATOR().update();
-    println!("update in chunk {:?}",time.elapsed());
+    let brickmap_data = BrickVec::from_vec(brickmap_data);
 
-    brickmap_grid
+    unsafe { brickmap_data.send() };
+
+    println!("update in chunk {:?}",time.elapsed());
+    //println!("brickmap_grid: {:?}",brickmap_grid.clone().into_iter().filter(|i| *i != 4294967295).collect::<Vec<_>>());
+
+    (brickmap_grid,brickmap_data)
 }
 pub const RED: Color = Color { col: ((1u32 << 9) - 1) << 16 };
 pub const BLUE: Color = Color { col: (1u32 << 9) - 1 };

@@ -106,7 +106,7 @@ pub fn gen_entity() -> Entity {
     let size = ivec3!(8,16,32);
     let len = (size.x/8 * size.y/8 * size.z/8) as usize;
 
-    let mut brickmap_grid:Vec<u32>   = vec![u32::MAX;len];
+    let mut brickmap_grid: Vec<u32>   = vec![u32::MAX;len];
     let mut brickmap_data: Vec<Brick> = Vec::new();
 
     let center = size.as_vec3() / 2.0; // Center of the sphere
@@ -130,6 +130,7 @@ pub fn gen_entity() -> Entity {
     }
     let brickmap_data = BrickVec::from_vec(brickmap_data);
     unsafe { brickmap_data.send() };
+    println!("send entity data");
 
     let ( brickmap_grid_ssbo, _brickmap_data_ssbo) = unsafe { brickmap_gen_ssbos(&brickmap_grid) };
 

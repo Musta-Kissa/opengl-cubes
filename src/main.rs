@@ -32,7 +32,7 @@ pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = 60.;//f64::MAX;
-pub const CHUNK_RADIUS: f32 = 1.5;
+pub const CHUNK_RADIUS: f32 = 2.0;
 pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
 struct AppState {
@@ -75,7 +75,8 @@ fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
 
 
-    unsafe { allocator::BrickAllocator::init(2*1024_u32.pow(3)/std::mem::size_of::<chunk::Brick>() as u32) };
+    unsafe { allocator::BrickAllocator::init(1 * (1024_u32.pow(3)/std::mem::size_of::<chunk::Brick>() as u32) - 100 ) };
+    println!("allocator size: {}",allocator::BRICK_ALLOCATOR().max_len);
 
     let mut state = AppState::with_window(win);
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
@@ -86,6 +87,22 @@ fn main() {
     state.camera.dir = vec3!(1.,-0.5004213,0.003213).norm();
     state.camera.speed = 64.;
 
+    let mut debug_ssbo = 0;
+    let mut debug_data = vec![0f32;1024];
+
+    unsafe {
+        use std::mem;
+
+        gl::GenBuffers(1, &mut debug_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            (1024 * mem::size_of::<i32>()) as isize,
+            debug_data.as_ptr() as *const _,
+            gl::DYNAMIC_DRAW,
+        );
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, debug_ssbo);
+    }
 
     // Load shaders
     let (screen_texturing_program,dda_program,clear_texture,draw_entity_program) = unsafe {
@@ -181,14 +198,13 @@ fn main() {
                     i+=1;
                 } else { // REMOVE CHUNK
                     unsafe {
-                        let chunk = entities.get(chunks[i]);
                         let time = std::time::Instant::now();
-                        //chunk.free_bricks();
-                        println!("free chunk bricks {:?}",time.elapsed());
+                        let chunk = entities.remove(chunks[i]);
                         gl::DeleteBuffers(1, &chunk.brickmap_grid_ssbo);
+                        allocator::BRICK_ALLOCATOR().free(chunk.brickmap_data);
+                        println!("free chunk bricks {:?}",time.elapsed());
                         //gl::DeleteBuffers(1, &chunk.brickmap_data_ssbo);
                     }
-                    entities.remove(chunks[i]);
                     chunks.swap_remove(i);
                     change_flag = true;
                 }
@@ -255,6 +271,9 @@ fn main() {
 
             draw_entity_program.set_vec3("light_dir",state.light_dir);
             draw_entity_program.set_float("fov",camera.fov);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, allocator::BRICK_ALLOCATOR().data_ssbo);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 10, debug_ssbo);
+
             for entity_handle in entities.depth_sorted_handles(camera.pos) {
                 let entity = entities.get(entity_handle);
                 let (local_ray_pos,local_ray_dir) = entity::ray_to_local(entity,camera.pos,camera.dir);
@@ -263,10 +282,26 @@ fn main() {
                 draw_entity_program.set_vec3("camera_pos",local_ray_pos);
                 draw_entity_program.set_vec3("camera_dir",local_ray_dir);
 
+                draw_entity_program.set_uint("brick_vec_start",entity.brickmap_data.start);
+                draw_entity_program.set_uint("brick_vec_len",entity.brickmap_data.len);
+                draw_entity_program.set_uint("brick_vec_capacity",entity.brickmap_data.capacity);
+
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, entity.brickmap_grid_ssbo);
-                gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, allocator::BRICK_ALLOCATOR().data_ssbo);
 
                 gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
+
+                /*
+                use crate::colors::*;
+                gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+                gl::GetBufferSubData(
+                    gl::SHADER_STORAGE_BUFFER,
+                    0,
+                    (debug_data.len() * std::mem::size_of::<i32>()) as _,
+                    debug_data.as_mut_ptr() as *mut _,
+                );
+                println!("{}debug num: {}{}",MAGENTA,debug_data[0],RESET_COL);
+                println!("{}debug num2: {}{}",MAGENTA,debug_data[1],RESET_COL);
+                */
             }
 
             /*
@@ -461,14 +496,15 @@ fn spawn_generator_thread(
                     continue;
                 }
                 // Now we have `pos` and can perform the remaining work without holding the lock
-                let brickmap_grid = chunk::gen_chunk_brickmap(pos);
+                let (brickmap_grid, brickmap_data) = chunk::gen_chunk_brickmap(pos);
                 //let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
-                let brickmap_grid_ssbo = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid) };
+                let (brickmap_grid_ssbo,_) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid) };
 
                 unsafe { gl::Flush() }; // Finish sending data to ssbo's
                 out_tx.send( Entity { 
                     brickmap_grid, 
                     brickmap_grid_ssbo, 
+                    brickmap_data,
                     pos: (pos * chunk::SIZE as i32).into(),
                     orientation: Quaternion::new(1.0,Vec3::ZERO), 
                     size: ivec3!(chunk::SIZE) 
@@ -496,12 +532,12 @@ impl Entities {
             return idx as u32;
         }
     }
-    pub fn remove(&mut self, idx: u32) {
+    pub fn remove(&mut self, idx: u32) -> Entity {
         if idx == self.inner.len() as u32 -1 {
-            self.inner.pop();
+            self.inner.pop().unwrap().unwrap()
         } else {
-            self.inner[idx as usize] = None;
             self.free_list.push(idx);
+            self.inner[idx as usize].take().unwrap()
         }
     }
     pub fn get(&mut self,idx: u32) -> &mut Entity {

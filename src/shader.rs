@@ -30,13 +30,12 @@ impl ShaderProgram {
     pub unsafe fn create_compute(cs: u32) -> ShaderProgram {
         let mut success:i32 = 0;
         let mut infolog: [u8;512]= [0;512];
-
         let program = gl::CreateProgram();
+
         gl::AttachShader(program, cs);
-
         gl::LinkProgram(program);
-
         gl::GetProgramiv(program, gl::LINK_STATUS, &mut success );
+
         if success == 0 {
             gl::GetProgramInfoLog(program, 512, null_mut(), infolog.as_mut_ptr() as *mut i8);
             panic!("shader linking error:\n{}", std::str::from_utf8(&infolog).unwrap());
@@ -49,6 +48,9 @@ impl ShaderProgram {
     }
     pub unsafe fn set_ivec3(self,name: &str,val: IVec3) {
         gl::Uniform3i(GetUniformLocation(self.0,name), val.x, val.y, val.z);
+    }
+    pub unsafe fn set_uivec3(self,name: &str, x: u32, y: u32, z:u32) {
+        gl::Uniform3ui(GetUniformLocation(self.0,name), x, y, z);
     }
     pub unsafe fn set_float(self,name: &str, val: f32) {
         gl::Uniform1f(GetUniformLocation(self.0,name), val);
