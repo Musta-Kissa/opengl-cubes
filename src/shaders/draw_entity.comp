@@ -43,7 +43,7 @@ vec3 step_mask(vec3 dist);
 uint getBrick(ivec3 brick_pos);
 float mask_vec3(vec3 v, vec3 mask);
 
-/// Assuming the entity neg corner is at (0,0,0) 
+/// Assuming the entity negative corner is at (0,0,0) 
 /// and the camera was transformed into the local coordinates
 void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);

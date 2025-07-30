@@ -1,5 +1,6 @@
 use my_math::prelude::*;
-use crate::chunk::{self,BrickMap};
+use crate::chunk;
+use crate::brickmap::{BrickMap,Voxel};
 
 pub struct Entity {
     pub brickmap: BrickMap,
@@ -11,7 +12,7 @@ pub struct Entity {
     pub size: IVec3,
 }
 
-pub fn gen_entity() -> Entity {
+pub fn gen_test_entity() -> Entity {
     let pos = vec3!(15.,313.,12.);
     let orientation = Quaternion::from_axis_angle(Vec3::Y,45.);
     let size = ivec3!(8,16,32);
@@ -31,7 +32,7 @@ pub fn gen_entity() -> Entity {
         for y in 0..size.y {
             for z in 0..size.z {
                 if is_in_ellipsoid(x,y,z) {
-                    brickmap.add_voxel(ivec3!(x,y,z), chunk::Voxel{ data:1, color: 1});
+                    brickmap.add_voxel(ivec3!(x,y,z), Voxel{ data:1, color: 1});
                 }
             }
         }

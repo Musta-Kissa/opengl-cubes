@@ -90,7 +90,7 @@ fn get_global_hashset() -> &'static mut HashSet<String> {
 pub unsafe fn GetUniformLocation(program: u32,name: &str) -> i32 {
     let out = gl::GetUniformLocation(program, CString::new(name).unwrap().as_ptr() as *const _);
     if out == -1 {
-        use crate::utils::colors::*;
+        use crate::utils::term_colors::*;
         let hashset = get_global_hashset();
         if !hashset.contains(name.into()) {
             println!("{RED}COULDNT FIND UNIFORM: \"{name}\"{RESET_COL}") ;

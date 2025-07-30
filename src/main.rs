@@ -12,6 +12,7 @@ mod shader;
 mod camera;
 mod octree;
 mod entity;
+mod brickmap;
 
 #[macro_use]
 extern crate my_math;
@@ -24,7 +25,8 @@ use std::sync::mpsc;
 use crate::utils::*;
 use crate::vertex::*;
 use crate::mesh::Mesh;
-use crate::chunk::Chunk;
+use crate::chunk::CHUNK_SIZE;
+use crate::entity::Entity;
 use std::sync::{Arc,Mutex, atomic::{AtomicBool, Ordering}};
 
 use camera::Camera;
@@ -83,25 +85,25 @@ fn main() {
 
 
     // Load shaders
-    let (screen_texturing_program,dda_program,clear_texture,draw_entity_program) = unsafe {
+    let (screen_texturing_program,clear_texture,draw_entity_program) = unsafe {
         use crate::shader::*;
         let uv_passthrough_vert         = compile_shader(gl::VERTEX_SHADER,"./shaders/uv_passthrough.vert");
         let texturig_frag               = compile_shader(gl::FRAGMENT_SHADER,"./shaders/texturing.frag");
         //let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_ray.comp");
-        let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
+        //let dda_compute_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/dda_brick.comp");
         let clear_texture_shader        = compile_shader(gl::COMPUTE_SHADER,"./shaders/clear_texture.comp");
         let draw_entity_shader          = compile_shader(gl::COMPUTE_SHADER,"./shaders/draw_entity.comp");
 
         let screen_texturing_program    = ShaderProgram::create_program(uv_passthrough_vert,texturig_frag);
-        let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
+        //let dda_program                 = ShaderProgram::create_compute(dda_compute_shader);
         let clear_texture               = ShaderProgram::create_compute(clear_texture_shader);
         let draw_entity_program         = ShaderProgram::create_compute(draw_entity_shader);
 
         gl::DeleteShader(uv_passthrough_vert);
         gl::DeleteShader(texturig_frag);
-        gl::DeleteShader(dda_compute_shader);
+        //gl::DeleteShader(dda_compute_shader);
         gl::DeleteShader(clear_texture_shader);
-        (screen_texturing_program,dda_program,clear_texture,draw_entity_program)
+        (screen_texturing_program,clear_texture,draw_entity_program)
     };
 
     let mut screen_mesh = Mesh::new();
@@ -151,7 +153,7 @@ fn main() {
         )).collect();
 
     let mut chunks: Vec<chunk::Chunk> = Vec::new();
-    let mut entity = entity::gen_entity();
+    let mut entity = entity::gen_test_entity();
     println!("{:?}",entity.brickmap.grid.arr.len());
 
     while !state.window.should_close() {
@@ -174,7 +176,7 @@ fn main() {
         // UPDATE CHUNKS
         {
             let mut change_flag = false;
-            let camera_pos = camera.pos / chunk::SIZE as f32;
+            let camera_pos = camera.pos / chunk::CHUNK_SIZE as f32;
             let r_squared = CHUNK_RADIUS*CHUNK_RADIUS;
 
             //target_chunks.retain(|pos| {
@@ -241,7 +243,7 @@ fn main() {
         }
         
         let dist_to_camera = |pos: IVec3| {
-            (camera.pos - (pos * chunk::SIZE as i32 + (chunk::SIZE as i32/2)).as_vec3() ).mag()
+            (camera.pos - (pos * chunk::CHUNK_SIZE as i32 + (chunk::CHUNK_SIZE as i32/2)).as_vec3() ).mag()
         };
         chunks.sort_by(|a,b| {
             dist_to_camera(a.pos).partial_cmp(&dist_to_camera(b.pos))
@@ -263,16 +265,20 @@ fn main() {
 
             gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
 
-            gl::UseProgram(*dda_program);
-            dda_program.set_float("fov",camera.fov);
-            dda_program.set_int("CHUNK_SIZE",chunk::SIZE as i32);
-            dda_program.set_vec3("camera_pos",camera.pos);
-            dda_program.set_vec3("camera_dir",camera.dir);
-            dda_program.set_vec3("light_dir",state.light_dir);
-            
+            //gl::UseProgram(*dda_program);
+            //dda_program.set_float("fov",camera.fov);
+            //dda_program.set_int("CHUNK_SIZE",chunk::SIZE as i32);
+            //dda_program.set_vec3("camera_pos",camera.pos);
+            //dda_program.set_vec3("camera_dir",camera.dir);
+            //dda_program.set_vec3("light_dir",state.light_dir);
+
+            draw_entity_program.set_ivec3("ENTITY_SIZE",ivec3!(CHUNK_SIZE));
             // Color texture
             for chunk in &chunks {
-                dda_program.set_ivec3("CHUNK_POS",chunk.pos);
+                let (local_ray_pos,local_ray_dir) = entity::ray_to_local(&chunk,camera.pos,camera.dir);
+                draw_entity_program.set_vec3("camera_pos",local_ray_pos);
+                draw_entity_program.set_vec3("camera_dir",local_ray_dir);
+                //dda_program.set_ivec3("CHUNK_POS",chunk.pos);
 
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, chunk.brickmap_grid_ssbo);
                 gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, chunk.brickmap_data_ssbo);
@@ -356,7 +362,7 @@ fn main() {
         state.window.swap_buffers();
 
         if test_time.elapsed() > Duration::from_millis(20) {
-            use crate::utils::colors::*;
+            use crate::utils::term_colors::*;
             println!("{}buffer swap time: {:?}{}",RED,test_time.elapsed(),RESET_COL);
         }
 
@@ -383,7 +389,7 @@ fn main() {
     }
 }
 fn gen_pos_in_radius(camera_pos: Vec3) -> Vec<IVec3> {
-    let camera_pos = camera_pos / chunk::SIZE as f32;
+    let camera_pos = camera_pos / chunk::CHUNK_SIZE as f32;
     let mut positions = Vec::new();
     let r_squared = CHUNK_RADIUS*CHUNK_RADIUS;
 
@@ -421,7 +427,7 @@ fn spawn_generator_thread(
     window:             &glfw::PWindow,
     requests:           Arc<Mutex<mpsc::Receiver<IVec3>>>,
     stop_flag:          Arc<AtomicBool>,
-    out_tx:             mpsc::Sender<Chunk>,
+    out_tx:             mpsc::Sender<chunk::Chunk>,
     ) -> std::thread::JoinHandle<()> 
 {
     // TODO: when we unload a chunk that didnt have time to load yet it is sill being generated, waste!
@@ -448,7 +454,14 @@ fn spawn_generator_thread(
                 let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
 
                 unsafe { gl::Flush() }; // Finish sending data to ssbo's
-                out_tx.send(Chunk { brickmap, brickmap_data_ssbo, brickmap_grid_ssbo, pos }).unwrap();
+                out_tx.send( Entity { 
+                    brickmap, 
+                    brickmap_data_ssbo, 
+                    brickmap_grid_ssbo, 
+                    pos, 
+                    orientation: Quaternion::IDENTITY,
+                    size: chunk::CHUNK_SIZE,
+                }).unwrap();
             }
         }
     })

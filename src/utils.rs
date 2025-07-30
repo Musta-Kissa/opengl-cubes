@@ -16,7 +16,7 @@ use crate::mesh::*;
 use my_math::prelude::*;
 use gl::types::GLenum;
 
-pub mod colors {
+pub mod term_colors {
     //for i in 0..100 {
         //println!("\x1b[{i}m{i}\x1b[0m");
     //}
@@ -395,3 +395,51 @@ const ALL_KEYS: &[Key] = &[
     Key::Menu ,
     //Key::Unknown ,
 ];
+
+pub mod colors {
+    use super::Color;
+
+    pub const RED: Color = Color { col: ((1u32 << 9) - 1) << 16 };
+    pub const BLUE: Color = Color { col: (1u32 << 9) - 1 };
+}
+
+// The order is reversed in memory
+#[derive(Clone, Copy)]
+pub struct ColorChanels {
+    pub b: u8,
+    pub g: u8,
+    pub r: u8,
+    pub a: u8,
+}
+#[derive(Clone, Copy)]
+pub union Color {
+    pub col: u32,
+    pub ch: ColorChanels,
+}
+impl std::ops::Mul<f64> for Color {
+    type Output = Color;
+    fn mul(self, rhs: f64) -> Self::Output {
+        unsafe {
+            let a = self.ch.a;
+            let r = (self.ch.r as f64 * rhs).floor() as u8;
+            let g = (self.ch.g as f64 * rhs).floor() as u8;
+            let b = (self.ch.b as f64 * rhs).floor() as u8;
+            Color {
+                ch: ColorChanels { a, r, g, b },
+            }
+        }
+    }
+}
+
+fn blend_color(c1: Color, c2: Color, ratio: f64) -> Color {
+    unsafe {
+        Color {
+            ch: ColorChanels {
+                a: c1.ch.a,
+                r: (c1.ch.r as f64 * ratio + c2.ch.r as f64 * (1. - ratio)).round() as u8,
+                g: (c1.ch.g as f64 * ratio + c2.ch.g as f64 * (1. - ratio)).round() as u8,
+                b: (c1.ch.b as f64 * ratio + c2.ch.b as f64 * (1. - ratio)).round() as u8,
+            },
+        }
+    }
+}
