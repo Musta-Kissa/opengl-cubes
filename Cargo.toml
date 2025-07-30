@@ -10,7 +10,7 @@ gl = "0.14.0"
 glfw = "0.59.0"
 my_math = { path = "../my-math" }
 
-#[profile.release]
+[profile.release]
 #opt-level = 3  # Optimization level (default is 3)
-#debug = true   # Include debug information
+debug = true   # Include debug information
 

@@ -40,6 +40,11 @@ pub unsafe fn brickmap_gen_ssbos(
         gl::DYNAMIC_DRAW,
     );
 
+    let error = gl::GetError();
+    if error != gl::NO_ERROR {
+        panic!("ERROR ON ALLOCATION");
+    }
+
     /*
     
     // Allocate buffer for Brick data, but don't fill it yet
@@ -100,7 +105,7 @@ pub fn brickmap_add_voxel(
     }
 }
 
-pub fn gen_entity() -> Entity {
+pub fn gen_entity() -> Option<Entity> {
     let pos = vec3!(15.,313.,12.);
     let orientation = Quaternion::from_axis_angle(Vec3::Y,45.);
     let size = ivec3!(8,16,32);
@@ -128,20 +133,20 @@ pub fn gen_entity() -> Entity {
             }
         }
     }
-    let brickmap_data = BrickVec::from_vec(brickmap_data);
+    let brickmap_data = BrickVec::from_vec(brickmap_data).ok()?;
     unsafe { brickmap_data.send() };
     println!("send entity data");
 
     let ( brickmap_grid_ssbo, _brickmap_data_ssbo) = unsafe { brickmap_gen_ssbos(&brickmap_grid) };
 
-    Entity { 
+    Some (Entity { 
         brickmap_grid,
         brickmap_data,
         brickmap_grid_ssbo,
         pos,
         orientation,
         size,
-    }
+    })
 }
 
 pub fn ray_to_local(entity: &Entity, ray_origin:Vec3,ray_dir:Vec3) -> (Vec3,Vec3) {

@@ -27,7 +27,7 @@ pub type Brick = [[[Voxel;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
 
 use crate::allocator::BRICK_ALLOCATOR;
 
-pub fn gen_chunk_brickmap(pos: IVec3,) -> (Vec<u32>,BrickVec) {
+pub fn gen_chunk_brickmap(pos: IVec3,) -> Option<(Vec<u32>,BrickVec)> {
     let len = (SIZE/BRICK_SIZE * SIZE/BRICK_SIZE * SIZE/BRICK_SIZE) as usize;
     let mut brickmap_grid:Vec<u32>   = vec![u32::MAX;len];
     let mut brickmap_data:Vec<Brick> = Vec::new();
@@ -67,13 +67,16 @@ pub fn gen_chunk_brickmap(pos: IVec3,) -> (Vec<u32>,BrickVec) {
     }
     let time = std::time::Instant::now();
     let brickmap_data = BrickVec::from_vec(brickmap_data);
+    if brickmap_data.is_err() {
+        return None;
+    }
 
-    unsafe { brickmap_data.send() };
+    unsafe { brickmap_data.as_ref().unwrap().send() };
 
     println!("update in chunk {:?}",time.elapsed());
     //println!("brickmap_grid: {:?}",brickmap_grid.clone().into_iter().filter(|i| *i != 4294967295).collect::<Vec<_>>());
 
-    (brickmap_grid,brickmap_data)
+    Some((brickmap_grid,brickmap_data.unwrap()))
 }
 pub const RED: Color = Color { col: ((1u32 << 9) - 1) << 16 };
 pub const BLUE: Color = Color { col: (1u32 << 9) - 1 };

@@ -32,7 +32,7 @@ pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = 60.;//f64::MAX;
-pub const CHUNK_RADIUS: f32 = 2.0;
+pub const CHUNK_RADIUS: f32 = 3.;
 pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
 struct AppState {
@@ -74,9 +74,14 @@ use std::sync::OnceLock;
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
 
+    let max_ssbo_bytes = unsafe {
+        let mut max_ssbo_size = 0;
+        gl::GetInteger64v(gl::MAX_SHADER_STORAGE_BLOCK_SIZE, &mut max_ssbo_size);
+        max_ssbo_size
+    };
 
-    unsafe { allocator::BrickAllocator::init(1 * (1024_u32.pow(3)/std::mem::size_of::<chunk::Brick>() as u32) - 100 ) };
-    println!("allocator size: {}",allocator::BRICK_ALLOCATOR().max_len);
+    unsafe { allocator::BrickAllocator::init((0.75 * max_ssbo_bytes as f64).round() as u32 /std::mem::size_of::<chunk::Brick>() as u32) };
+    println!("allocator size: {}GiB",allocator::BRICK_ALLOCATOR().max_len as f64 * std::mem::size_of::<chunk::Brick>() as f64 / 1024. / 1024. / 1024.);
 
     let mut state = AppState::with_window(win);
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
@@ -102,6 +107,7 @@ fn main() {
             gl::DYNAMIC_DRAW,
         );
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, debug_ssbo);
+
     }
 
     // Load shaders
@@ -162,7 +168,7 @@ fn main() {
 
     let mut entities = Entities::new();
     let mut chunks: Vec<u32> = Vec::new();
-    let mut entity_handle = entities.add(entity::gen_entity());
+    let mut entity_handle = entities.add(entity::gen_entity().unwrap());
 
     while !state.window.should_close() {
         let frame_time = Instant::now();
@@ -496,19 +502,26 @@ fn spawn_generator_thread(
                     continue;
                 }
                 // Now we have `pos` and can perform the remaining work without holding the lock
-                let (brickmap_grid, brickmap_data) = chunk::gen_chunk_brickmap(pos);
-                //let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
-                let (brickmap_grid_ssbo,_) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid) };
+                if let Some((brickmap_grid, brickmap_data)) = chunk::gen_chunk_brickmap(pos) {
 
-                unsafe { gl::Flush() }; // Finish sending data to ssbo's
-                out_tx.send( Entity { 
-                    brickmap_grid, 
-                    brickmap_grid_ssbo, 
-                    brickmap_data,
-                    pos: (pos * chunk::SIZE as i32).into(),
-                    orientation: Quaternion::new(1.0,Vec3::ZERO), 
-                    size: ivec3!(chunk::SIZE) 
-                }).unwrap();
+                    //let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid,&brickmap_data) };
+                    let (brickmap_grid_ssbo,_) = unsafe { entity::brickmap_gen_ssbos(&brickmap_grid) };
+
+                    unsafe { gl::Flush() }; // Finish sending data to ssbo's
+                    out_tx.send( Entity { 
+                        brickmap_grid, 
+                        brickmap_grid_ssbo, 
+                        brickmap_data,
+                        pos: (pos * chunk::SIZE as i32).into(),
+                        orientation: Quaternion::new(1.0,Vec3::ZERO), 
+                        size: ivec3!(chunk::SIZE) 
+                    }).unwrap();
+
+                // add back to queue
+                } else {
+
+                }
+
             }
         }
     })
