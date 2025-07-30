@@ -1,6 +1,10 @@
 use my_math::vec::*;
 use crate::utils;
 
+use crate::utils::GetBufferParameterui64vNV;
+use crate::utils::MakeBufferResidentNV;
+use crate::utils::BUFFER_GPU_ADDRESS_NV;
+
 pub const BRICK_SIZE: usize = 8;
 
 #[repr(C)]
@@ -68,11 +72,15 @@ impl BrickMap {
             data[brick_coords.x as usize][brick_coords.y as usize][brick_coords.z as usize] = voxel;
         }
     }
-    pub unsafe fn gen_ssbos(&self) -> (u32,u32) {
+    pub unsafe fn gen_ssbos(&self) -> (u32,u64,u32,u64) {
         use std::mem;
+        let glGetBufferParameterui64vNV = GetBufferParameterui64vNV.unwrap();
+        let glMakeBufferResidentNV = MakeBufferResidentNV.unwrap(); 
 
         let mut brick_grid_ssbo = 0;
+        let mut brick_grid_ssbo_addr = 0;
         let mut brick_data_ssbo = 0;
+        let mut brick_data_ssbo_addr = 0;
 
         gl::GenBuffers(1, &mut brick_grid_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, brick_grid_ssbo);
@@ -82,6 +90,13 @@ impl BrickMap {
             self.grid.as_ptr() as *const _,
             gl::DYNAMIC_DRAW,
         );
+
+        glGetBufferParameterui64vNV(gl::SHADER_STORAGE_BUFFER, BUFFER_GPU_ADDRESS_NV, &mut brick_grid_ssbo_addr);
+        glMakeBufferResidentNV(gl::SHADER_STORAGE_BUFFER, gl::READ_ONLY);
+
+
+        //gl::GetBufferParameterui64vNV(gl::SHADER_STORAGE_BUFFER, gl::BUFFER_GPU_ADDRESS_NV, &mut brick_grid_ssbo_addr);
+        //gl::MakeBufferResidentNV(gl::SHADER_STORAGE_BUFFER, gl::READ_ONLY);
         
         // Allocate buffer for Brick data, but don't fill it yet
         let total_size = mem::size_of::<self::Brick>() * self.data.len();
@@ -93,6 +108,8 @@ impl BrickMap {
             std::ptr::null(), // no initial data
             gl::DYNAMIC_DRAW,
         );
+        glGetBufferParameterui64vNV(gl::SHADER_STORAGE_BUFFER, BUFFER_GPU_ADDRESS_NV, &mut brick_grid_ssbo_addr);
+        glMakeBufferResidentNV(gl::SHADER_STORAGE_BUFFER, gl::READ_ONLY);
 
         // Upload data in chunks
         let chunk_size = 1024^2;
@@ -113,6 +130,6 @@ impl BrickMap {
 
         gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
         
-        (brick_grid_ssbo, brick_data_ssbo)
+        (brick_grid_ssbo, brick_grid_ssbo_addr ,brick_data_ssbo,brick_data_ssbo_addr)
     }
 }

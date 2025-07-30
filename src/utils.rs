@@ -14,7 +14,7 @@ use crate::vertex::*;
 use crate::mesh::*;
 
 use my_math::prelude::*;
-use gl::types::GLenum;
+use gl::types::*;
 
 pub mod term_colors {
     //for i in 0..100 {
@@ -180,6 +180,10 @@ impl InputTracker {
     }
 }
 
+pub const BUFFER_GPU_ADDRESS_NV: u32 = 0x8F1D;
+pub static mut GetBufferParameterui64vNV: Option<unsafe extern "system" fn(target: GLenum, pname: GLenum, params: *mut GLuint64)> = None;
+pub static mut MakeBufferResidentNV: Option<unsafe extern "system" fn(target: GLenum, access: GLenum)> = None;
+
 pub unsafe fn init(width: u32,height: u32) -> (Glfw,PWindow, glfw::GlfwReceiver<(f64, glfw::WindowEvent)>) {
     let mut glfw = glfw::init(fail_on_errors!()).unwrap();
     glfw.window_hint(glfw::WindowHint::DepthBits(Some(24)));
@@ -195,6 +199,31 @@ pub unsafe fn init(width: u32,height: u32) -> (Glfw,PWindow, glfw::GlfwReceiver<
     //global_loader::load_global_gl(&|s| w.as_mut().unwrap().get_proc_address(ptr_to_str(s)) as *const _);
     gl::load_with(|s| window.get_proc_address(s) as *const _);
 
+
+    unsafe {
+        GetBufferParameterui64vNV = {
+            let ptr = {
+                //let cname = std::ffi::CString::new().unwrap();
+                glfw.get_proc_address_raw(&"glGetBufferParameterui64vNV")
+            };
+            if ptr.is_null() {
+                panic!();
+            } else {
+                Some(std::mem::transmute(ptr))
+            }
+        };
+        MakeBufferResidentNV = {
+            let ptr = {
+                //let cname = std::ffi::CString::new().unwrap();
+                glfw.get_proc_address_raw(&"glMakeBufferResidentNV")
+            };
+            if ptr.is_null() {
+                panic!();
+            } else {
+                Some(std::mem::transmute(ptr))
+            }
+        };
+    }
 
     gl::Viewport(0, 0, width as i32, height as i32);
 

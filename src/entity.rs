@@ -4,8 +4,21 @@ use crate::brickmap::{BrickMap,Voxel};
 
 pub struct Entity {
     pub brickmap: BrickMap,
+
     pub brickmap_grid_ssbo: u32,
+    pub brickmap_grid_ssbo_addr: u64,
     pub brickmap_data_ssbo: u32,
+    pub brickmap_data_ssbo_addr: u64,
+
+    pub pos: Vec3,
+    pub orientation: Quaternion,
+    pub size: IVec3,
+}
+
+#[repr(C)]
+pub struct GPUEntity {
+    pub brickmap_grid_ssbo_addr: u64,
+    pub brickmap_data_ssbo_addr: u64,
 
     pub pos: Vec3,
     pub orientation: Quaternion,
@@ -37,12 +50,16 @@ pub fn gen_test_entity() -> Entity {
             }
         }
     }
-    let ( brickmap_grid_ssbo, brickmap_data_ssbo,) = unsafe { brickmap.gen_ssbos() };
+    let (brickmap_grid_ssbo, brickmap_grid_ssbo_addr ,brickmap_data_ssbo,brickmap_data_ssbo_addr) = unsafe { brickmap.gen_ssbos() };
 
     Entity { 
         brickmap,
+
         brickmap_grid_ssbo,
+        brickmap_grid_ssbo_addr,
         brickmap_data_ssbo,
+        brickmap_data_ssbo_addr,
+
         pos,
         orientation,
         size,

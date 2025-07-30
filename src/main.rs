@@ -3,7 +3,6 @@
 //#![allow(unused_variables)]
 //
 //#![allow(warnings)]
-
 mod chunk;
 mod mesh;
 mod vertex;
@@ -13,9 +12,9 @@ mod camera;
 mod octree;
 mod entity;
 mod brickmap;
-
 #[macro_use]
 extern crate my_math;
+
 use my_math::prelude::*;
 
 use glfw::{Context, Key, PWindow};
@@ -73,6 +72,7 @@ fn clear_screen() {
 
 fn main() {
     let (mut glfw, win, events) = unsafe { utils::init(WIDTH,HEIGHT) };
+    
 
     let mut state = AppState::with_window(win);
     //state.camera.pos= vec3!(1900./3.5+ 256.0,
@@ -188,7 +188,7 @@ fn main() {
             // REMOVE CHUNKS
             let mut i = 0;
             while i < chunks.len() {
-                let pos = chunks[i].pos;
+                let pos = chunks[i].pos / chunk::CHUNK_SIZE as f32;
                 let dx = pos.x as f32 + 0.5 - camera_pos.x;
                 let dz = pos.z as f32 + 0.5 - camera_pos.z;
                 if (dx*dx + dz*dz) <= r_squared { // CHUNK POS IS STILL VALID
@@ -227,7 +227,7 @@ fn main() {
                 }
             }
             let dist_to_camera = |pos: IVec3| {
-                ((pos.as_vec3() + 0.5) - camera_pos).mag()
+                ((pos.as_vec3() + 0.5)*chunk::CHUNK_SIZE as f32 - camera_pos).mag()
             };
             pos_to_add.sort_by(|a,b| {
                 dist_to_camera(*a).partial_cmp(&dist_to_camera(*b))
@@ -242,8 +242,9 @@ fn main() {
             }
         }
         
-        let dist_to_camera = |pos: IVec3| {
-            (camera.pos - (pos * chunk::CHUNK_SIZE as i32 + (chunk::CHUNK_SIZE as i32/2)).as_vec3() ).mag()
+        let dist_to_camera = |pos: Vec3| {
+            //(camera.pos - (pos * chunk::CHUNK_SIZE as f32 + (chunk::CHUNK_SIZE as i32/2) as f32) ).mag()
+            (camera.pos - (pos + (chunk::CHUNK_SIZE as i32/2) as f32) ).mag()
         };
         chunks.sort_by(|a,b| {
             dist_to_camera(a.pos).partial_cmp(&dist_to_camera(b.pos))
@@ -451,16 +452,18 @@ fn spawn_generator_thread(
             if let Ok(pos) = pos {
                 // Now we have `pos` and can perform the remaining work without holding the lock
                 let brickmap = chunk::gen_brickmap_2d(pos);
-                let (brickmap_grid_ssbo, brickmap_data_ssbo) = unsafe { brickmap.gen_ssbos() };
+                let (brickmap_grid_ssbo, brickmap_grid_ssbo_addr ,brickmap_data_ssbo,brickmap_data_ssbo_addr) = unsafe { brickmap.gen_ssbos() };
 
                 unsafe { gl::Flush() }; // Finish sending data to ssbo's
                 out_tx.send( Entity { 
                     brickmap, 
                     brickmap_data_ssbo, 
+                    brickmap_data_ssbo_addr, 
                     brickmap_grid_ssbo, 
-                    pos, 
+                    brickmap_grid_ssbo_addr, 
+                    pos: (pos * chunk::CHUNK_SIZE as i32).as_vec3(), 
                     orientation: Quaternion::IDENTITY,
-                    size: chunk::CHUNK_SIZE,
+                    size: ivec3!(chunk::CHUNK_SIZE),
                 }).unwrap();
             }
         }
