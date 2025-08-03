@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(non_upper_case_globals)]
 //#![allow(unused_parens)]
 //#![allow(unused_variables)]
 //
@@ -25,8 +26,9 @@ use crate::utils::*;
 use crate::vertex::*;
 use crate::mesh::Mesh;
 use crate::chunk::CHUNK_SIZE;
-use crate::entity::Entity;
+use crate::entity::{Entity,GPUEntity};
 use std::sync::{Arc,Mutex, atomic::{AtomicBool, Ordering}};
+use crate::brickmap::Brick;
 
 use camera::Camera;
 
@@ -34,7 +36,7 @@ pub const HEIGHT: u32 = 1000;
 pub const WIDTH: u32 = HEIGHT * 16/9;
 
 pub const FPS: f64 = f64::MAX;
-pub const CHUNK_RADIUS: f32 = 3.5;
+pub const CHUNK_RADIUS: f32 = 1.5;
 pub const GENERATOR_THREAD_COUNT: u32 = 2;
 
 struct AppState {
@@ -54,7 +56,7 @@ impl AppState {
             window,
             camera: Camera::default(),
             d_t: 1.,
-            light_dir: vec3!(1.,1.,0.).norm(),
+            light_dir: Vec3 { x: 0.98123676, y: -0.05549547, z: 0.2620155 }.norm(),
             input: utils::InputTracker::new(),
 
             wireframe: false,
@@ -80,7 +82,8 @@ fn main() {
                             //1900./3.5+ 512.0);
     //state.camera.pos = Vec3 { x: chunk::SIZE as f32 / 2., y: 220.88193, z: chunk::SIZE as f32 / 2.};
     state.camera.pos = vec3!(15.,313.,12.);
-    state.camera.dir = vec3!(1.,0.,0.).norm();
+    state.camera.pos = Vec3 { x: -11.250015, y: 322.1623, z: 24.850925 };
+    state.camera.dir = Vec3 { x: 0.9999848, y: -0.0052359644, z: -0.0017453047 };
     state.camera.speed = 64.;
 
 
@@ -140,8 +143,6 @@ fn main() {
     }
     
 
-    let time = std::time::Instant::now();
-
     let generate_thread_stop_flag = Arc::new(AtomicBool::new(false));
     let generate_thread_handles:Vec<JoinHandle<()>> = 
         (0..GENERATOR_THREAD_COUNT).map(|_| 
@@ -153,8 +154,9 @@ fn main() {
         )).collect();
 
     let mut chunks: Vec<chunk::Chunk> = Vec::new();
-    let mut entity = entity::gen_test_entity();
-    println!("{:?}",entity.brickmap.grid.arr.len());
+    let mut test_entity = entity::gen_test_entity();
+
+
 
     while !state.window.should_close() {
         let frame_time = Instant::now();
@@ -188,7 +190,7 @@ fn main() {
             // REMOVE CHUNKS
             let mut i = 0;
             while i < chunks.len() {
-                let pos = chunks[i].pos / chunk::CHUNK_SIZE as f32;
+                let pos = chunks[i].gpu_entity.pos / chunk::CHUNK_SIZE as f32;
                 let dx = pos.x as f32 + 0.5 - camera_pos.x;
                 let dz = pos.z as f32 + 0.5 - camera_pos.z;
                 if (dx*dx + dz*dz) <= r_squared { // CHUNK POS IS STILL VALID
@@ -247,34 +249,65 @@ fn main() {
             (camera.pos - (pos + (chunk::CHUNK_SIZE as i32/2) as f32) ).mag()
         };
         chunks.sort_by(|a,b| {
-            dist_to_camera(a.pos).partial_cmp(&dist_to_camera(b.pos))
+            dist_to_camera(a.gpu_entity.pos).partial_cmp(&dist_to_camera(b.gpu_entity.pos))
             .expect("Coundnt compare")
         });
+
+        use crate::entity::GPUEntity;
+        let mut gpu_entities = vec![test_entity.gpu_entity];
+
+        for chunk in &chunks {
+            gpu_entities.push(chunk.gpu_entity);
+        }
+
+        let mut gpu_entities_ssbo = 0;
+        unsafe {
+            gl::GenBuffers(1, &mut gpu_entities_ssbo);
+            gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, gpu_entities_ssbo);
+            gl::BufferData(
+                gl::SHADER_STORAGE_BUFFER,
+                (gpu_entities.len() * core::mem::size_of::<GPUEntity>()) as isize,
+                gpu_entities.as_ptr() as *const _,
+                gl::DYNAMIC_DRAW,
+            );
+            gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+        }
+        // debug ssbo 
+        let mut debug_ssbo: u32 = 0;
+        unsafe {
+            gl::GenBuffers(1, &mut debug_ssbo);
+            gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+
+            let init_vels = [crate::brickmap::new_brick();16];
+            let buffer_size = (8 * std::mem::size_of::<Brick>()) as isize;
+            gl::BufferData(gl::SHADER_STORAGE_BUFFER, buffer_size, init_vels.as_ptr() as *const _, gl::DYNAMIC_COPY);
+
+            gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+        }
 
         // RENDER /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         unsafe {
-            let (local_ray_pos,local_ray_dir) = entity::ray_to_local(&entity,camera.pos,camera.dir);
+            // Color texture
             gl::UseProgram(*draw_entity_program);
-            draw_entity_program.set_ivec3("ENTITY_SIZE",entity.size);
-            draw_entity_program.set_float("fov",camera.fov);
+
+            let (local_ray_pos,local_ray_dir) = entity::ray_to_local(&test_entity,camera.pos,camera.dir);
             draw_entity_program.set_vec3("camera_pos",local_ray_pos);
             draw_entity_program.set_vec3("camera_dir",local_ray_dir);
+
+            draw_entity_program.set_float("fov",camera.fov);
             draw_entity_program.set_vec3("light_dir",state.light_dir);
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, entity.brickmap_grid_ssbo);
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, entity.brickmap_data_ssbo);
+            draw_entity_program.set_uint("ENTITY_NUM",gpu_entities.len() as u32);
+
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, gpu_entities_ssbo);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, test_entity.brickmap_grid_ssbo);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, test_entity.brickmap_data_ssbo);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 4, debug_ssbo);
 
             gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
 
-            //gl::UseProgram(*dda_program);
-            //dda_program.set_float("fov",camera.fov);
-            //dda_program.set_int("CHUNK_SIZE",chunk::SIZE as i32);
-            //dda_program.set_vec3("camera_pos",camera.pos);
-            //dda_program.set_vec3("camera_dir",camera.dir);
-            //dda_program.set_vec3("light_dir",state.light_dir);
 
-            draw_entity_program.set_ivec3("ENTITY_SIZE",ivec3!(CHUNK_SIZE));
-            // Color texture
+            /*
             for chunk in &chunks {
                 let (local_ray_pos,local_ray_dir) = entity::ray_to_local(&chunk,camera.pos,camera.dir);
                 draw_entity_program.set_vec3("camera_pos",local_ray_pos);
@@ -286,6 +319,32 @@ fn main() {
 
                 gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
             }
+            */
+
+            {
+                let mut debug_data = [crate::brickmap::new_brick();16];
+                unsafe {
+                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, debug_ssbo);
+
+                    let ptr = gl::MapBuffer(gl::SHADER_STORAGE_BUFFER, gl::READ_ONLY) as *const Brick;
+                    if !ptr.is_null() {
+                        // Copy into your own buffer
+                        std::ptr::copy_nonoverlapping(ptr, debug_data.as_mut_ptr(), debug_data.len());
+                        gl::UnmapBuffer(gl::SHADER_STORAGE_BUFFER);
+                    }
+
+                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+                }
+                //for n in 0..8 {
+                    ////println!("{:?} \n -> \n {:?}", debug_data[n*2],debug_data[n*2+1]);
+                    //if( debug_data[n*2] != debug_data[n*2+1]) {
+                       //panic!(); 
+                    //} else {
+                        //println!("same");
+                    //}
+                //}
+            }
+
             
             // Draw texture
             gl::UseProgram(*screen_texturing_program);
@@ -293,8 +352,12 @@ fn main() {
             // Clear texture
             gl::UseProgram(*clear_texture);
             gl::DispatchCompute(WIDTH /16 +1, HEIGHT/16 +1, 1);
-            //gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
         }
+
+        for e in gpu_entities {
+            println!("size: {:?}",e.size);
+        }
+        println!();
 
 
         glfw.poll_events();
@@ -318,7 +381,6 @@ fn main() {
                 _ => (),
             }
         }
-
         
         for key in &state.input.just_pressed {
             match key {
@@ -354,7 +416,7 @@ fn main() {
 
                 Key::H => state.light_dir.rot_quat(1. * state.d_t / 16. ,vec3!(-1.,0.,1.)),
 
-                Key::U => entity.pos = entity.pos - Vec3::Y * state.d_t / 16.,
+                Key::U => test_entity.gpu_entity.pos = test_entity.gpu_entity.pos - Vec3::Y * state.d_t / 16.,
 
                 _ => (),
             }
@@ -458,12 +520,16 @@ fn spawn_generator_thread(
                 out_tx.send( Entity { 
                     brickmap, 
                     brickmap_data_ssbo, 
-                    brickmap_data_ssbo_addr, 
                     brickmap_grid_ssbo, 
-                    brickmap_grid_ssbo_addr, 
-                    pos: (pos * chunk::CHUNK_SIZE as i32).as_vec3(), 
-                    orientation: Quaternion::IDENTITY,
-                    size: ivec3!(chunk::CHUNK_SIZE),
+                    gpu_entity: GPUEntity {
+                        brickmap_data_ssbo_addr, 
+                        brickmap_grid_ssbo_addr, 
+                        pos: (pos * chunk::CHUNK_SIZE as i32).as_vec3(), 
+                        _padding1: 7777,
+                        orientation: Quaternion::IDENTITY,
+                        size: ivec3!(chunk::CHUNK_SIZE),
+                        _padding3: 777777,
+                    },
                 }).unwrap();
             }
         }

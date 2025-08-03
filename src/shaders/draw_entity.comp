@@ -25,16 +25,8 @@ struct Brick {
     Voxel data[BRICK_SIZE][BRICK_SIZE][BRICK_SIZE];
 };
 
-layout(std430, binding = 2) buffer BrickGridBuffer {
-    uint brickGrid[];
-};
-layout(std430, binding = 3) buffer BrickDataBuffer {
-    Brick brickData[];
-};
-
 struct Quaternion {
-    vec3 v;
-    float w;
+    vec4 v;
 };
 
 struct GPUEntity {
@@ -42,16 +34,47 @@ struct GPUEntity {
     uint64_t brickmap_data_ssbo_addr;
 
     vec3 pos;
+    uint _padding;
+
     Quaternion orientation;
+
     ivec3 size;
+    uint _padding2;
 };
 
-uniform ivec3 ENTITY_SIZE;
-const ivec3 ENTITY_SIZE_BIRCK = ENTITY_SIZE/BRICK_SIZE;
+layout(std140, binding = 1) buffer GpuEntities {
+    GPUEntity gpu_entities[];
+};
+
+/*
+layout(std430) readonly buffer Grid {
+    uint brick_grid[];
+};
+layout(std430) readonly buffer Data {
+    Brick brick_data[];
+};
+*/
+
+layout(std430, binding = 2) buffer BrickGridBuffer {
+    uint brickGrid[];
+};
+layout(std430, binding = 3) buffer BrickDataBuffer {
+    Brick brickData[];
+};
+
+layout(std430, binding = 4) buffer DebugBuffer {
+    Brick debug_buffer[];
+};
+
+uniform uint ENTITY_NUM;
 uniform vec3 camera_pos;
 uniform vec3 camera_dir;
 uniform vec3 light_dir;
 uniform float fov;
+
+ivec3 ENTITY_SIZE;
+ivec3 ENTITY_SIZE_BRICK;
+GPUEntity CURR_ENTITY;
 
 RayHit ray_entity(vec3 ray_start, vec3 ray_dir);
 RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask);
@@ -65,42 +88,58 @@ void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
     vec4 curr_pixel = imageLoad(screen,pixel_coords);
 
-    if (curr_pixel != vec4(0)){
-            return;
-    }
+    uint* brickmap_grid = (uint*)(gpu_entities[0].brickmap_grid_ssbo_addr);
+    Brick* brickmap_data = (Brick*)(gpu_entities[0].brickmap_data_ssbo_addr);
 
-    vec2 res = vec2(imageSize(screen));
-    if (any(greaterThan(pixel_coords, res)))
-        return;
-
-	vec2 ndc = (vec2(pixel_coords) * 2 - res) / res;
-    ndc.x *= res.x / res.y;
-
-    vec3 forward = camera_dir;
-    vec3 left    = normalize(cross(forward, vec3(0.,1.,0.)));
-    vec3 up      = cross(left,forward);
-
-    float scale  = tan(radians(fov * 0.5));
-    vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
-
-    RayHit ray_hit = ray_entity(camera_pos,ray_dir);
-
-    // SHADING
-    if (ray_hit.dist > 0.) {
-        vec3 hit_dir = vec3(ray_hit.dir);
-
-        float ambient = 0.05;
-        float dot_light = dot(light_dir,hit_dir);
-        float ratio = (dot_light + 1.0) / 2.0;
-        vec3 color = normalize(vec3(ray_hit.color << 24 >> 24,
-                                    ray_hit.color << 16 >> 24,
-                                    ray_hit.color <<  8 >> 24));
-        vec3 pixel = (color * ratio) + color * ambient;
-        imageStore(screen, pixel_coords, vec4(pixel,1.0));
-    }
-    //if ( ray_hit.dist == -2) {
-        //imageStore(screen, pixel_coords, vec4(0,1,0,0));
+    //for( int i = 0; i < 8; i++ ) {
+        //debug_buffer[i*2] = brickData[i];
+        //debug_buffer[i*2+1] = brickmap_data[i]; 
     //}
+
+
+    for( int n = 0; n < 1; n++ ) {
+        CURR_ENTITY = gpu_entities[n];
+        ENTITY_SIZE = CURR_ENTITY.size;
+        ENTITY_SIZE_BRICK = ENTITY_SIZE / BRICK_SIZE;
+
+
+        if (curr_pixel != vec4(0)){
+                return;
+        }
+
+        vec2 res = vec2(imageSize(screen));
+        if (any(greaterThan(pixel_coords, res)))
+            return;
+
+        vec2 ndc = (vec2(pixel_coords) * 2 - res) / res;
+        ndc.x *= res.x / res.y;
+
+        vec3 forward = camera_dir;
+        vec3 left    = normalize(cross(forward, vec3(0.,1.,0.)));
+        vec3 up      = cross(left,forward);
+
+        float scale  = tan(radians(fov * 0.5));
+        vec3 ray_dir = normalize(forward - (ndc.x * scale * left) + (ndc.y * scale * up));
+
+        RayHit ray_hit = ray_entity(camera_pos,ray_dir);
+
+        // SHADING
+        if (ray_hit.dist > 0.) {
+            vec3 hit_dir = vec3(ray_hit.dir);
+
+            float ambient = 0.05;
+            float dot_light = dot(light_dir,hit_dir);
+            float ratio = (dot_light + 1.0) / 2.0;
+            vec3 color = normalize(vec3(ray_hit.color << 24 >> 24,
+                                        ray_hit.color << 16 >> 24,
+                                        ray_hit.color <<  8 >> 24));
+            vec3 pixel = (color * ratio) + color * ambient;
+            imageStore(screen, pixel_coords, vec4(pixel,1.0));
+        }
+        //if ( ray_hit.dist == -2) {
+            //imageStore(screen, pixel_coords, vec4(0,1,0,0));
+        //}
+    }
 }
 
 RayHit ray_entity(vec3 ray_start, vec3 ray_dir){
@@ -113,7 +152,7 @@ RayHit ray_entity(vec3 ray_start, vec3 ray_dir){
 
     // Initialize t_min and t_max
     vec3 t0 = (0 - ray_start) * inv_dir;
-    vec3 t1 = (0 + ENTITY_SIZE_BIRCK - ray_start) * inv_dir; 
+    vec3 t1 = (0 + ENTITY_SIZE_BRICK - ray_start) * inv_dir; 
 
     // Reorder t_min and t_max for each axis
     vec3 t_min = min(t0, t1);
@@ -183,13 +222,17 @@ RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
     ivec3 step_dir  = ivec3(sign(ray_dir));
     vec3 axis_dist  = ((brick_pos - ray_start) + 0.5 + step_dir * 0.5) * inv_dir;
 
+    Brick* brick_data = ((Brick*)(CURR_ENTITY.brickmap_data_ssbo_addr));
+
     int steps = 0;
     while( all(lessThan         (brick_pos,ivec3(8)) ) && 
            all(greaterThanEqual (brick_pos,ivec3(0)) ) )
     {
         if (brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
+        //if (brick_data[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].data != 0) {
             ivec3 hit_dir = ivec3(mask*step_dir);
-            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
+            //return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, brickData[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
+            return RayHit(brick_pos, hit_dir, mask_vec3(axis_dist,mask), steps, brick_data[brick_index].data[brick_pos.x][brick_pos.y][brick_pos.z].color);
         }
 
         mask       = step_mask(axis_dist);
@@ -203,14 +246,20 @@ RayHit traceBrick(uint brick_index,vec3 ray_start, vec3 ray_dir, vec3 mask) {
 }
 
 uint getBrick(ivec3 brick_pos) {
-    if (brick_pos.x < 0 || brick_pos.x >= ENTITY_SIZE_BIRCK.x ||
-        brick_pos.y < 0 || brick_pos.y >= ENTITY_SIZE_BIRCK.y ||
-        brick_pos.z < 0 || brick_pos.z >= ENTITY_SIZE_BIRCK.z )
+    if (brick_pos.x < 0 || brick_pos.x >= ENTITY_SIZE_BRICK.x ||
+        brick_pos.y < 0 || brick_pos.y >= ENTITY_SIZE_BRICK.y ||
+        brick_pos.z < 0 || brick_pos.z >= ENTITY_SIZE_BRICK.z )
     {
         return 69696969; 
     } else {
-        return brickGrid[brick_pos.x * ENTITY_SIZE_BIRCK.y * ENTITY_SIZE_BIRCK.z + 
-                         brick_pos.y * ENTITY_SIZE_BIRCK.z + 
+        /*
+        return ((uint*)(CURR_ENTITY.brickmap_grid_ssbo_addr))
+                        [brick_pos.x * ENTITY_SIZE_BRICK.y * ENTITY_SIZE_BRICK.z + 
+                         brick_pos.y * ENTITY_SIZE_BRICK.z + 
+                         brick_pos.z ];
+                         */
+        return ((uint*)(CURR_ENTITY.brickmap_grid_ssbo_addr))[brick_pos.x * ENTITY_SIZE_BRICK.y * ENTITY_SIZE_BRICK.z + 
+                         brick_pos.y * ENTITY_SIZE_BRICK.z + 
                          brick_pos.z ];
     }
 }

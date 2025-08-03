@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use my_math::vec::*;
 use crate::utils;
 
@@ -8,13 +9,18 @@ use crate::utils::BUFFER_GPU_ADDRESS_NV;
 pub const BRICK_SIZE: usize = 8;
 
 #[repr(C)]
-#[derive(Clone,Copy)]
+#[derive(Clone,Copy,Debug)]
+#[derive(PartialEq)]
 pub struct Voxel {
     pub data: u32,
     pub color: u32,
 }
 
 pub type Brick = [[[Voxel;BRICK_SIZE];BRICK_SIZE];BRICK_SIZE];
+
+pub fn new_brick() -> Brick {
+    [[[Voxel{data:0,color:0};BRICK_SIZE];BRICK_SIZE];BRICK_SIZE]
+}
 
 pub struct BrickGrid {
     pub arr: Vec<u32>,
@@ -108,7 +114,7 @@ impl BrickMap {
             std::ptr::null(), // no initial data
             gl::DYNAMIC_DRAW,
         );
-        glGetBufferParameterui64vNV(gl::SHADER_STORAGE_BUFFER, BUFFER_GPU_ADDRESS_NV, &mut brick_grid_ssbo_addr);
+        glGetBufferParameterui64vNV(gl::SHADER_STORAGE_BUFFER, BUFFER_GPU_ADDRESS_NV, &mut brick_data_ssbo_addr);
         glMakeBufferResidentNV(gl::SHADER_STORAGE_BUFFER, gl::READ_ONLY);
 
         // Upload data in chunks
