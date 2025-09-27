@@ -197,7 +197,7 @@ RayHit dda_3d(vec3 ray_start, vec3 ray_dir){
     vec3 mask = step_mask(axis_dist);
     while (total_dist < max_distance) {
         uint curr_brick_index = getBrick(grid_pos);
-        if (curr_brick_index != MAX_UINT) {
+        if (curr_brick_index != MAX_UINT && curr_brick_index != 69696969) {
             vec3 intersect = ray_start + ray_dir*total_dist;
             vec3 uv3d = intersect - grid_pos;
 
